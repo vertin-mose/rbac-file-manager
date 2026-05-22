@@ -1,0 +1,110 @@
+services:
+  # ========== MySQL Database ==========
+  mysql:
+    image: mysql:8.0
+    container_name: rbac-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${DB_NAME:-rbac_file_manager}
+      MYSQL_USER: ${DB_USERNAME:-rbac_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-rbac_pass}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rbac-network
+
+  # ========== Redis Cache ==========
+  redis:
+    image: redis:7-alpine
+    container_name: rbac-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rbac-network
+
+  # ========== MinIO (Object Storage) ==========
+  minio:
+    image: minio/minio
+    container_name: rbac-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rbac-network
+
+  # ========== Backend (Python FastAPI) ==========
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rbac-backend
+    environment:
+      PYTHONUNBUFFERED: 1
+      DB_USERNAME: ${DB_USERNAME:-rbac_user}
+      DB_PASSWORD: ${DB_PASSWORD:-rbac_pass}
+      DB_HOST: mysql
+      REDIS_HOST: redis
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      JWT_SECRET: ${JWT_SECRET:-c2VjdXJlLXNlY3JldC1rZXktZm9yLXJiYWMtZmlsZS1tYW5hZ2VyLTIwMjQ=}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - rbac-network
+
+  # ========== Frontend (Vue 3 + Nginx) ==========
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rbac-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - rbac-network
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:
+
+networks:
+  rbac-network:
+    driver: bridge

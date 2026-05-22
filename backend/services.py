@@ -1,0 +1,360 @@
+"""Business logic: auth, roles, files, audit."""
+
+import csv
+import io
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from fastapi import HTTPException, UploadFile
+from minio import Minio
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
+from auth import create_token, hash_password, verify_password
+from config import settings
+from models import (
+    AuditLog, FilePermission, FileRecord, Permission, Role, RoleHierarchy, User,
+)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+def get_minio_client() -> Optional[Minio]:
+    try:
+        url = settings.MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
+        client = Minio(url, access_key=settings.MINIO_ACCESS_KEY,
+                       secret_key=settings.MINIO_SECRET_KEY, secure=False)
+        if not client.bucket_exists(settings.MINIO_BUCKET):
+            client.make_bucket(settings.MINIO_BUCKET)
+        return client
+    except Exception:
+        return None
+
+
+def record_audit(db: Session, user_id: int, username: str, action: str,
+                 detail: str = "", ip: str = "", success: bool = True):
+    log = AuditLog(user_id=user_id, username=username, action=action,
+                   detail=detail, ip_address=ip, success=success)
+    db.add(log)
+    db.commit()
+
+
+def get_effective_permissions(role_id: int, db: Session) -> set[str]:
+    """Recursively collect own + inherited permission names for a role."""
+    visited = set()
+    result = set()
+
+    def collect(rid: int):
+        if rid in visited:
+            return
+        visited.add(rid)
+        role = db.get(Role, rid)
+        if not role:
+            return
+        for p in role.permissions:
+            result.add(p.name)
+        for ir in role.inherited_roles:
+            collect(ir.id)
+
+    collect(role_id)
+    return result
+
+
+# ── Auth Service ───────────────────────────────────────────────────────────
+
+# Role display names & levels (for enterprise document management)
+ROLE_DISPLAY = {
+    'SUPER_ADMIN': '超级管理员',
+    'ADMIN': '系统管理员',
+    'MANAGER': '部门经理',
+    'EDITOR': '文档编辑员',
+    'REVIEWER': '文档审核员',
+    'VIEWER': '外部访客',
+}
+ROLE_LEVEL = {
+    'SUPER_ADMIN': 1,
+    'ADMIN': 2,
+    'MANAGER': 3,
+    'EDITOR': 4,
+    'REVIEWER': 4,
+    'VIEWER': 5,
+}
+
+
+def login(db: Session, username: str, password: str, ip: str = "") -> dict:
+    user = db.query(User).filter(User.username == username, User.deleted == False).first()
+    if not user or not verify_password(password, user.password):
+        record_audit(db, user.id if user else 0, username, "LOGIN_FAILED", ip=ip, success=False)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if not user.enabled:
+        raise HTTPException(status_code=403, detail="Account disabled")
+
+    role_names = [r.name for r in user.roles]
+    all_perms = set()
+    for r in user.roles:
+        all_perms |= get_effective_permissions(r.id, db)
+
+    token = create_token(user.id, user.username, role_names)
+    record_audit(db, user.id, user.username, "LOGIN", detail="Login successful", ip=ip)
+
+    return {"token": token, "username": user.username, "display_name": user.display_name,
+            "roles": role_names,
+            "role_info": [
+                {"name": r, "display_name": ROLE_DISPLAY.get(r, r), "level": ROLE_LEVEL.get(r, 99)}
+                for r in role_names
+            ],
+            "permissions": sorted(all_perms)}
+
+
+def register(db: Session, username: str, password: str,
+             display_name: Optional[str] = None, email: Optional[str] = None) -> dict:
+    exists = db.query(User).filter(User.username == username, User.deleted == False).first()
+    if exists:
+        raise HTTPException(status_code=409, detail="Username already taken")
+
+    user = User(username=username, password=hash_password(password),
+                display_name=display_name, email=email)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username,
+            "display_name": user.display_name, "email": user.email}
+
+
+# ── Role Service ───────────────────────────────────────────────────────────
+
+def list_roles(db: Session) -> list[dict]:
+    roles = db.query(Role).filter(Role.deleted == False).all()
+    result = []
+    for r in roles:
+        perms = [{"id": p.id, "name": p.name, "description": p.description,
+                   "category": p.category} for p in r.permissions]
+        inherited = get_effective_permissions(r.id, db) - {p.name for p in r.permissions}
+        inherited_perms = db.query(Permission).filter(Permission.name.in_(inherited)).all() if inherited else []
+        result.append({
+            "id": r.id, "name": r.name, "description": r.description,
+            "permissions": perms,
+            "inherited_permissions": [{"id": p.id, "name": p.name, "description": p.description,
+                                        "category": p.category} for p in inherited_perms],
+        })
+    return result
+
+
+def get_role(db: Session, role_id: int) -> dict:
+    role = db.get(Role, role_id)
+    if not role or role.deleted:
+        raise HTTPException(status_code=404, detail="Role not found")
+    perms = [{"id": p.id, "name": p.name, "description": p.description, "category": p.category}
+             for p in role.permissions]
+    inherited_names = get_effective_permissions(role.id, db) - {p.name for p in role.permissions}
+    inherited_perms = db.query(Permission).filter(Permission.name.in_(inherited_names)).all() if inherited_names else []
+    return {
+        "id": role.id, "name": role.name, "description": role.description,
+        "permissions": perms,
+        "inherited_permissions": [{"id": p.id, "name": p.name, "description": p.description,
+                                    "category": p.category} for p in inherited_perms],
+    }
+
+
+def create_role(db: Session, name: str, description: str = "", permission_ids: list[int] = None) -> dict:
+    exists = db.query(Role).filter(Role.name == name, Role.deleted == False).first()
+    if exists:
+        raise HTTPException(status_code=409, detail="Role name already exists")
+    role = Role(name=name, description=description)
+    if permission_ids:
+        perms = db.query(Permission).filter(Permission.id.in_(permission_ids)).all()
+        role.permissions = perms
+    db.add(role)
+    db.commit()
+    db.refresh(role)
+    return get_role(db, role.id)
+
+
+def update_role(db: Session, role_id: int, name: Optional[str] = None,
+                description: Optional[str] = None) -> dict:
+    role = db.get(Role, role_id)
+    if not role or role.deleted:
+        raise HTTPException(status_code=404, detail="Role not found")
+    if name:
+        existing = db.query(Role).filter(Role.name == name, Role.id != role_id,
+                                          Role.deleted == False).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Role name already exists")
+        role.name = name
+    if description is not None:
+        role.description = description
+    db.commit()
+    db.refresh(role)
+    return get_role(db, role.id)
+
+
+def delete_role(db: Session, role_id: int):
+    role = db.get(Role, role_id)
+    if not role or role.deleted:
+        raise HTTPException(status_code=404, detail="Role not found")
+    role.deleted = True
+    db.commit()
+
+
+def assign_permissions(db: Session, role_id: int, permission_ids: list[int]):
+    role = db.get(Role, role_id)
+    if not role or role.deleted:
+        raise HTTPException(status_code=404, detail="Role not found")
+    perms = db.query(Permission).filter(Permission.id.in_(permission_ids)).all()
+    role.permissions = perms
+    db.commit()
+
+
+def get_hierarchy(db: Session) -> list[dict]:
+    rows = db.query(RoleHierarchy).all()
+    result = []
+    for row in rows:
+        senior = db.get(Role, row.role_id)
+        junior = db.get(Role, row.inherited_role_id)
+        if senior and junior:
+            result.append({"role_id": row.role_id, "role_name": senior.name,
+                           "inherited_role_id": row.inherited_role_id,
+                           "inherited_role_name": junior.name})
+    return result
+
+
+def assign_user_roles(db: Session, user_id: int, role_ids: list[int]):
+    user = db.get(User, user_id)
+    if not user or user.deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    roles = db.query(Role).filter(Role.id.in_(role_ids), Role.deleted == False).all()
+    user.roles = roles
+    db.commit()
+
+
+# ── File Service ───────────────────────────────────────────────────────────
+
+def list_files(db: Session, parent_id: int = 0, user_id: int = None):
+    if parent_id == 0:
+        files = db.query(FileRecord).filter(
+            FileRecord.parent_id.is_(None), FileRecord.deleted == False).all()
+    else:
+        files = db.query(FileRecord).filter(
+            FileRecord.parent_id == parent_id, FileRecord.deleted == False).all()
+    return [_file_to_dict(f) for f in files]
+
+
+def _file_to_dict(f: FileRecord) -> dict:
+    return {
+        "id": f.id, "file_name": f.file_name, "is_directory": f.is_directory,
+        "size": f.size or 0, "mime_type": f.mime_type, "owner_id": f.owner_id,
+        "parent_id": f.parent_id,
+        "created_at": f.created_at.isoformat() if f.created_at else None,
+        "updated_at": f.updated_at.isoformat() if f.updated_at else None,
+    }
+
+
+def get_file(db: Session, file_id: int) -> dict:
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    return _file_to_dict(f)
+
+
+async def upload_file(db: Session, file: UploadFile, parent_id: int, owner_id: int) -> dict:
+    minio_client = get_minio_client()
+    ext = file.filename.rsplit(".", 1)[-1] if "." in (file.filename or "") else ""
+    storage_name = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+    storage_url = ""
+    content = await file.read()
+
+    if minio_client:
+        minio_client.put_object(settings.MINIO_BUCKET, storage_name,
+                                io.BytesIO(content), len(content))
+        storage_url = f"{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{storage_name}"
+
+    f = FileRecord(
+        file_name=file.filename or "unnamed",
+        parent_id=parent_id if parent_id != 0 else None,
+        is_directory=False, size=len(content),
+        mime_type=file.content_type, owner_id=owner_id,
+        storage_url=storage_url,
+    )
+    db.add(f)
+    db.commit()
+    db.refresh(f)
+    return _file_to_dict(f)
+
+
+def create_directory(db: Session, name: str, parent_id: int, owner_id: int) -> dict:
+    f = FileRecord(
+        file_name=name, parent_id=parent_id if parent_id != 0 else None,
+        is_directory=True, owner_id=owner_id,
+    )
+    db.add(f)
+    db.commit()
+    db.refresh(f)
+    return _file_to_dict(f)
+
+
+def rename_file(db: Session, file_id: int, new_name: str) -> dict:
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    f.file_name = new_name
+    db.commit()
+    db.refresh(f)
+    return _file_to_dict(f)
+
+
+def delete_file(db: Session, file_id: int):
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    f.deleted = True
+    # Soft-delete children too
+    for child in f.children:
+        child.deleted = True
+    db.commit()
+
+
+def share_file(db: Session, file_id: int, user_ids: list[int], role_ids: list[int]):
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    for uid in user_ids:
+        db.add(FilePermission(file_id=file_id, user_id=uid, permission_type="read"))
+    for rid in role_ids:
+        db.add(FilePermission(file_id=file_id, role_id=rid, permission_type="read"))
+    db.commit()
+
+
+# ── Audit Service ──────────────────────────────────────────────────────────
+
+def query_audit_logs(db: Session, page: int = 1, size: int = 20,
+                     action: str = None, user_id: int = None) -> dict:
+    q = db.query(AuditLog).filter(AuditLog.deleted == False)
+    if action:
+        q = q.filter(AuditLog.action == action)
+    if user_id:
+        q = q.filter(AuditLog.user_id == user_id)
+    total = q.count()
+    q = q.order_by(desc(AuditLog.created_at)).offset((page - 1) * size).limit(size)
+    items = []
+    for log in q:
+        items.append({
+            "id": log.id, "user_id": log.user_id, "username": log.username,
+            "action": log.action, "detail": log.detail, "ip_address": log.ip_address,
+            "success": log.success,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+    return {"items": items, "total": total, "page": page, "size": size}
+
+
+def export_audit_logs(db: Session) -> str:
+    logs = db.query(AuditLog).filter(AuditLog.deleted == False).order_by(
+        desc(AuditLog.created_at)).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID", "UserID", "Username", "Action", "Detail", "IP", "Success", "CreatedAt"])
+    for log in logs:
+        writer.writerow([log.id, log.user_id, log.username, log.action,
+                         log.detail, log.ip_address, log.success,
+                         log.created_at.isoformat() if log.created_at else ""])
+    return output.getvalue()

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pymysql
+redis
+PyJWT
+bcrypt
+python-multipart
+minio
+python-dotenv

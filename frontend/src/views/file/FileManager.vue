@@ -9,10 +9,14 @@
         <div>
           <p class="eyebrow">Workspace</p>
           <h1>文件管理</h1>
-          <p class="hero-copy">集中查看目录结构、上传文档，并按权限执行协作动作。</p>
+          <p class="hero-copy">集中查看目录结构、上传文档，并按权限执行协作操作。</p>
         </div>
         <div class="hero-actions">
-          <el-button v-if="userStore.hasPermission('doc:create')" type="primary" @click="openCreateDialog()">
+          <el-button
+            v-if="userStore.hasPermission('doc:create')"
+            type="primary"
+            @click="openCreateDialog()"
+          >
             新建目录
           </el-button>
           <el-upload
@@ -23,7 +27,7 @@
           >
             <el-button type="success">上传文件</el-button>
           </el-upload>
-          <el-button @click="refreshAll" :loading="fileStore.loading">刷新</el-button>
+          <el-button :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
         </div>
       </section>
 
@@ -35,7 +39,7 @@
             :can-update="userStore.hasPermission('doc:update')"
             :can-delete="userStore.hasPermission('doc:delete')"
             @select="handleTreeSelect"
-            @create-root="openCreateDialog()"
+            @create-root="openRootCreateDialog"
             @create-child="openCreateDialog"
             @rename="openRenameDialog"
             @delete="confirmDeleteTreeNode"
@@ -62,7 +66,7 @@
               <div class="table-header">
                 <div>
                   <h2>目录内容</h2>
-                  <p>双击目录进入，单击选中以执行操作。</p>
+                  <p>双击目录进入，单击选中项目后执行操作。</p>
                 </div>
                 <div class="action-tags">
                   <el-tag v-if="userStore.hasPermission('doc:create')" effect="plain">创建</el-tag>
@@ -94,31 +98,40 @@
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column prop="mimeType" label="类型" min-width="140">
+
+              <el-table-column label="类型" min-width="140">
                 <template #default="{ row }">
                   {{ row.isDirectory ? '目录' : row.mimeType || '文件' }}
                 </template>
               </el-table-column>
+
               <el-table-column label="大小" width="120">
                 <template #default="{ row }">
                   {{ row.isDirectory ? '--' : formatBytes(row.size) }}
                 </template>
               </el-table-column>
+
               <el-table-column label="更新时间" min-width="180">
                 <template #default="{ row }">
                   {{ formatDateTime(row.updatedAt || row.createdAt) }}
                 </template>
               </el-table-column>
+
               <el-table-column label="操作" min-width="340" fixed="right">
                 <template #default="{ row }">
                   <div class="table-actions">
-                    <el-button v-if="row.isDirectory" link type="primary" @click.stop="fileStore.openFileDirectory(row)">
+                    <el-button
+                      v-if="row.isDirectory"
+                      link
+                      type="primary"
+                      @click.stop="fileStore.openFileDirectory(row)"
+                    >
                       打开
                     </el-button>
                     <el-button
                       v-if="userStore.hasPermission('doc:update')"
                       link
-                      @click.stop="openRenameDialog({ id: row.id, label: row.fileName, parentId: row.parentId || 0 })"
+                      @click.stop="openRenameDialog({ id: row.id, label: row.fileName })"
                     >
                       重命名
                     </el-button>
@@ -172,10 +185,19 @@
       </div>
     </template>
 
-    <el-dialog v-model="dialogs.create.visible" :title="dialogs.create.parentId === 0 ? '新建根目录' : '新建子目录'" width="420px">
-      <el-form label-position="top">
+    <el-dialog
+      v-model="dialogs.create.visible"
+      :title="dialogs.create.parentId === 0 ? '新建根目录' : '新建子目录'"
+      width="420px"
+    >
+      <el-form label-position="top" @submit.prevent>
         <el-form-item label="目录名称">
-          <el-input v-model="dialogs.create.name" maxlength="120" placeholder="请输入目录名称" />
+          <el-input
+            v-model="dialogs.create.name"
+            maxlength="120"
+            placeholder="请输入目录名称"
+            @keyup.enter="submitCreateDirectory"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -184,10 +206,19 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dialogs.rename.visible" title="重命名" width="420px">
-      <el-form label-position="top">
+    <el-dialog
+      v-model="dialogs.rename.visible"
+      title="重命名"
+      width="420px"
+    >
+      <el-form label-position="top" @submit.prevent>
         <el-form-item label="名称">
-          <el-input v-model="dialogs.rename.name" maxlength="120" placeholder="请输入新名称" />
+          <el-input
+            v-model="dialogs.rename.name"
+            maxlength="120"
+            placeholder="请输入新的名称"
+            @keyup.enter="submitRename"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -232,7 +263,17 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type UploadFile as ElUploadFile } from 'element-plus'
 import { Document, Folder } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
-import { approveFile, commentFile, createDirectory, deleteFile, renameFile, reviewFile, shareFile, uploadFile, type FileItem } from '@/api/file'
+import {
+  approveFile,
+  commentFile,
+  createDirectory,
+  deleteFile,
+  renameFile,
+  reviewFile,
+  shareFile,
+  uploadFile,
+  type FileItem,
+} from '@/api/file'
 import { useFileStore } from '@/store/file'
 import { useUserStore } from '@/store/user'
 import { formatBytes, formatDateTime } from '@/utils/format'
@@ -248,6 +289,7 @@ const dialogs = reactive({
     visible: false,
     parentId: 0,
     name: '',
+    jumpToRootAfterSubmit: false,
   },
   rename: {
     visible: false,
@@ -282,36 +324,55 @@ async function refreshAll() {
   await fileTreeRef.value?.reload()
 }
 
-function openCreateDialog(payload?: { id?: number; label?: string; parentId?: number }) {
+function openCreateDialog(payload?: { id?: number; parentId?: number }) {
   dialogs.create.parentId = payload?.id ?? payload?.parentId ?? fileStore.currentParentId
   dialogs.create.name = ''
+  dialogs.create.jumpToRootAfterSubmit = false
+  dialogs.create.visible = true
+}
+
+function openRootCreateDialog() {
+  dialogs.create.parentId = 0
+  dialogs.create.name = ''
+  dialogs.create.jumpToRootAfterSubmit = true
   dialogs.create.visible = true
 }
 
 async function submitCreateDirectory() {
-  if (!dialogs.create.name.trim()) {
+  const name = dialogs.create.name.trim()
+  if (!name) {
     ElMessage.warning('目录名称不能为空')
     return
   }
-  await createDirectory(dialogs.create.name.trim(), dialogs.create.parentId)
+
+  await createDirectory(name, dialogs.create.parentId)
   dialogs.create.visible = false
+  dialogs.create.name = ''
   ElMessage.success('目录已创建')
+
+  if (dialogs.create.jumpToRootAfterSubmit) {
+    await fileStore.resetToRoot()
+  }
+
   await refreshAll()
 }
 
-function openRenameDialog(payload: { id: number; label: string; parentId?: number }) {
+function openRenameDialog(payload: { id: number; label: string }) {
   dialogs.rename.fileId = payload.id
   dialogs.rename.name = payload.label
   dialogs.rename.visible = true
 }
 
 async function submitRename() {
-  if (!dialogs.rename.name.trim()) {
+  const name = dialogs.rename.name.trim()
+  if (!name) {
     ElMessage.warning('名称不能为空')
     return
   }
-  await renameFile(dialogs.rename.fileId, dialogs.rename.name.trim())
+
+  await renameFile(dialogs.rename.fileId, name)
   dialogs.rename.visible = false
+  dialogs.rename.name = ''
   ElMessage.success('已重命名')
   await refreshAll()
 }
@@ -355,15 +416,15 @@ async function submitAction() {
 
 async function confirmDelete(file: FileItem) {
   try {
-  await ElMessageBox.confirm(`确认删除 ${file.fileName} 吗？`, '删除确认', {
-    type: 'warning',
-  })
-  await deleteFile(file.id)
-  if (fileStore.selectedFile?.id === file.id) {
-    fileStore.selectFile(null)
-  }
-  ElMessage.success('已删除')
-  await refreshAll()
+    await ElMessageBox.confirm(`确认删除 ${file.fileName} 吗？`, '删除确认', {
+      type: 'warning',
+    })
+    await deleteFile(file.id)
+    if (fileStore.selectedFile?.id === file.id) {
+      fileStore.selectFile(null)
+    }
+    ElMessage.success('已删除')
+    await refreshAll()
   } catch {
     return
   }
@@ -371,12 +432,12 @@ async function confirmDelete(file: FileItem) {
 
 async function confirmDeleteTreeNode(node: { id: number; label: string }) {
   try {
-  await ElMessageBox.confirm(`确认删除目录 ${node.label} 吗？`, '删除确认', {
-    type: 'warning',
-  })
-  await deleteFile(node.id)
-  ElMessage.success('目录已删除')
-  await refreshAll()
+    await ElMessageBox.confirm(`确认删除目录 ${node.label} 吗？`, '删除确认', {
+      type: 'warning',
+    })
+    await deleteFile(node.id)
+    ElMessage.success('目录已删除')
+    await refreshAll()
   } catch {
     return
   }

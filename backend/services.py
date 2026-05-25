@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from auth import create_token, hash_password, verify_password
 from config import settings
 from models import (
-    AuditLog, FilePermission, FileRecord, Permission, Role, RoleHierarchy, User,
+    AuditLog, FilePermission, FileRecord, Permission, Role, RoleHierarchy, RolePermission, User, UserRole,
 )
 
 
@@ -50,10 +50,11 @@ def get_effective_permissions(role_id: int, db: Session) -> set[str]:
             return
         visited.add(rid)
         role = db.get(Role, rid)
-        if not role:
+        if not role or role.deleted:
             return
         for p in role.permissions:
-            result.add(p.name)
+            if not p.deleted:
+                result.add(p.name)
         for ir in role.inherited_roles:
             collect(ir.id)
 
@@ -81,6 +82,24 @@ ROLE_LEVEL = {
     'VIEWER': 5,
 }
 
+# Override the garbled seed/display text with canonical role labels and descriptions.
+ROLE_DISPLAY = {
+    'SUPER_ADMIN': '超级管理员',
+    'ADMIN': '系统管理员',
+    'MANAGER': '部门经理',
+    'EDITOR': '文档编辑员',
+    'REVIEWER': '文档审核员',
+    'VIEWER': '访客',
+}
+ROLE_DESCRIPTION = {
+    'SUPER_ADMIN': '系统最高权限，管理全部功能模块与系统配置。',
+    'ADMIN': '负责用户、角色、审计导出和系统备份等管理工作。',
+    'MANAGER': '管理部门文档和成员，可审批、删除文档并查看审计日志。',
+    'EDITOR': '负责创建、编辑、共享文档，并参与评论协作。',
+    'REVIEWER': '负责审阅文档、添加评论与批注，并提出修改建议。',
+    'VIEWER': '仅可浏览、检索和导出文档内容。',
+}
+
 
 def login(db: Session, username: str, password: str, ip: str = "") -> dict:
     user = db.query(User).filter(User.username == username, User.deleted == False).first()
@@ -90,9 +109,10 @@ def login(db: Session, username: str, password: str, ip: str = "") -> dict:
     if not user.enabled:
         raise HTTPException(status_code=403, detail="Account disabled")
 
-    role_names = [r.name for r in user.roles]
+    active_roles = [r for r in user.roles if not r.deleted]
+    role_names = [r.name for r in active_roles]
     all_perms = set()
-    for r in user.roles:
+    for r in active_roles:
         all_perms |= get_effective_permissions(r.id, db)
 
     token = create_token(user.id, user.username, role_names)
@@ -105,6 +125,10 @@ def login(db: Session, username: str, password: str, ip: str = "") -> dict:
                 for r in role_names
             ],
             "permissions": sorted(all_perms)}
+
+
+def get_role_description(role: Role) -> str:
+    return ROLE_DESCRIPTION.get(role.name, role.description or "")
 
 
 def register(db: Session, username: str, password: str,
@@ -128,12 +152,15 @@ def list_roles(db: Session) -> list[dict]:
     roles = db.query(Role).filter(Role.deleted == False).all()
     result = []
     for r in roles:
+        active_permissions = [p for p in r.permissions if not p.deleted]
         perms = [{"id": p.id, "name": p.name, "description": p.description,
-                   "category": p.category} for p in r.permissions]
-        inherited = get_effective_permissions(r.id, db) - {p.name for p in r.permissions}
-        inherited_perms = db.query(Permission).filter(Permission.name.in_(inherited)).all() if inherited else []
+                   "category": p.category} for p in active_permissions]
+        inherited = get_effective_permissions(r.id, db) - {p.name for p in active_permissions}
+        inherited_perms = db.query(Permission).filter(
+            Permission.name.in_(inherited), Permission.deleted == False
+        ).all() if inherited else []
         result.append({
-            "id": r.id, "name": r.name, "description": r.description,
+            "id": r.id, "name": r.name, "description": get_role_description(r),
             "permissions": perms,
             "inherited_permissions": [{"id": p.id, "name": p.name, "description": p.description,
                                         "category": p.category} for p in inherited_perms],
@@ -145,12 +172,15 @@ def get_role(db: Session, role_id: int) -> dict:
     role = db.get(Role, role_id)
     if not role or role.deleted:
         raise HTTPException(status_code=404, detail="Role not found")
+    active_permissions = [p for p in role.permissions if not p.deleted]
     perms = [{"id": p.id, "name": p.name, "description": p.description, "category": p.category}
-             for p in role.permissions]
-    inherited_names = get_effective_permissions(role.id, db) - {p.name for p in role.permissions}
-    inherited_perms = db.query(Permission).filter(Permission.name.in_(inherited_names)).all() if inherited_names else []
+             for p in active_permissions]
+    inherited_names = get_effective_permissions(role.id, db) - {p.name for p in active_permissions}
+    inherited_perms = db.query(Permission).filter(
+        Permission.name.in_(inherited_names), Permission.deleted == False
+    ).all() if inherited_names else []
     return {
-        "id": role.id, "name": role.name, "description": role.description,
+        "id": role.id, "name": role.name, "description": get_role_description(role),
         "permissions": perms,
         "inherited_permissions": [{"id": p.id, "name": p.name, "description": p.description,
                                     "category": p.category} for p in inherited_perms],
@@ -193,6 +223,13 @@ def delete_role(db: Session, role_id: int):
     role = db.get(Role, role_id)
     if not role or role.deleted:
         raise HTTPException(status_code=404, detail="Role not found")
+    role.permissions = []
+    role.inherited_roles = []
+    db.query(UserRole).filter(UserRole.role_id == role_id).delete(synchronize_session=False)
+    db.query(RolePermission).filter(RolePermission.role_id == role_id).delete(synchronize_session=False)
+    db.query(RoleHierarchy).filter(
+        RoleHierarchy.inherited_role_id == role_id
+    ).delete(synchronize_session=False)
     role.deleted = True
     db.commit()
 
@@ -212,7 +249,7 @@ def get_hierarchy(db: Session) -> list[dict]:
     for row in rows:
         senior = db.get(Role, row.role_id)
         junior = db.get(Role, row.inherited_role_id)
-        if senior and junior:
+        if senior and junior and not senior.deleted and not junior.deleted:
             result.append({"role_id": row.role_id, "role_name": senior.name,
                            "inherited_role_id": row.inherited_role_id,
                            "inherited_role_name": junior.name})
@@ -307,10 +344,16 @@ def delete_file(db: Session, file_id: int):
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
-    f.deleted = True
-    # Soft-delete children too
-    for child in f.children:
-        child.deleted = True
+    deleted_ids: list[int] = []
+
+    def mark_deleted(node: FileRecord):
+        deleted_ids.append(node.id)
+        node.deleted = True
+        for child in (node.children or []):
+            mark_deleted(child)
+
+    mark_deleted(f)
+    db.query(FilePermission).filter(FilePermission.file_id.in_(deleted_ids)).delete(synchronize_session=False)
     db.commit()
 
 

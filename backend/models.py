@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Boolean, BigInteger, DateTime, Text, ForeignKey
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import backref, declarative_base, relationship
 from pydantic import BaseModel
 
 # ── SQLAlchemy ORM Models ──────────────────────────────────────────────────
@@ -71,7 +71,11 @@ class FileRecord(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     deleted = Column(Boolean, default=False)
 
-    children = relationship("FileRecord", backref="parent", remote_side=[id], lazy="selectin")
+    children = relationship(
+        "FileRecord",
+        backref=backref("parent", remote_side=[id]),
+        lazy="selectin"
+    )
     owner = relationship("User", lazy="selectin")
 
 

@@ -354,6 +354,7 @@ async function submitAction() {
 }
 
 async function confirmDelete(file: FileItem) {
+  try {
   await ElMessageBox.confirm(`确认删除 ${file.fileName} 吗？`, '删除确认', {
     type: 'warning',
   })
@@ -363,15 +364,22 @@ async function confirmDelete(file: FileItem) {
   }
   ElMessage.success('已删除')
   await refreshAll()
+  } catch {
+    return
+  }
 }
 
 async function confirmDeleteTreeNode(node: { id: number; label: string }) {
+  try {
   await ElMessageBox.confirm(`确认删除目录 ${node.label} 吗？`, '删除确认', {
     type: 'warning',
   })
   await deleteFile(node.id)
   ElMessage.success('目录已删除')
   await refreshAll()
+  } catch {
+    return
+  }
 }
 
 function handleRowClick(row: FileItem) {

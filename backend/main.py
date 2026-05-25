@@ -61,7 +61,7 @@ def require_perm(permission: str):
         await get_current_user(request)
         from models import Role
         for role_name in request.state.roles:
-            role = db.query(Role).filter(Role.name == role_name).first()
+            role = db.query(Role).filter(Role.name == role_name, Role.deleted == False).first()
             if role and permission in get_effective_permissions(role.id, db):
                 return True
         raise HTTPException(status_code=403, detail="Insufficient permissions")

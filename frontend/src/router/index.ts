@@ -8,6 +8,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: false },
     },
     {
+        path: '/register',
+        name: 'Register',
+        component: () => import('@/views/login/RegisterView.vue'),
+        meta: { requiresAuth: false },
+    },
+    {
         path: '/',
         component: () => import('@/components/AppLayout.vue'),
         meta: { requiresAuth: true },
@@ -53,10 +59,18 @@ const router = createRouter({
 // Navigation guard: check authentication
 router.beforeEach((to, _from, next) => {
     const token = localStorage.getItem('token')
+    const roles = JSON.parse(localStorage.getItem('roles') || '[]') as string[]
     if (to.meta.requiresAuth && !token) {
         next('/login')
-    } else if (to.path === '/login' && token) {
+    } else if ((to.path === '/login' || to.path === '/register') && token) {
         next('/dashboard')
+    } else if (to.meta.roles && Array.isArray(to.meta.roles)) {
+        const allowedRoles = to.meta.roles as string[]
+        if (allowedRoles.some(role => roles.includes(role))) {
+            next()
+        } else {
+            next('/dashboard')
+        }
     } else {
         next()
     }

@@ -8,12 +8,32 @@ export interface FileItem {
     mimeType: string
     ownerId: number
     parentId: number | null
-    createdAt: string
-    updatedAt: string
+    createdAt: string | null
+    updatedAt: string | null
 }
 
-export function getFiles(parentId: number = 0) {
-    return request.get('/files', { params: { parentId } })
+function mapFileItem(item: any): FileItem {
+    return {
+        id: item.id,
+        fileName: item.file_name,
+        isDirectory: item.is_directory,
+        size: item.size,
+        mimeType: item.mime_type || '',
+        ownerId: item.owner_id,
+        parentId: item.parent_id ?? null,
+        createdAt: item.created_at ?? null,
+        updatedAt: item.updated_at ?? null,
+    }
+}
+
+export async function getFiles(parentId: number = 0): Promise<FileItem[]> {
+    const res: any = await request.get('/files', { params: { parentId } })
+    return (res.data || []).map(mapFileItem)
+}
+
+export async function getFile(id: number): Promise<FileItem> {
+    const res: any = await request.get(`/files/${id}`)
+    return mapFileItem(res.data)
 }
 
 export function uploadFile(file: File, parentId: number) {
@@ -26,7 +46,7 @@ export function uploadFile(file: File, parentId: number) {
 }
 
 export function createDirectory(name: string, parentId: number = 0) {
-    return request.post('/files/directory', { fileName: name, parentId })
+    return request.post('/files/directory', { file_name: name, parent_id: parentId })
 }
 
 export function deleteFile(id: number) {
@@ -34,5 +54,24 @@ export function deleteFile(id: number) {
 }
 
 export function renameFile(id: number, newName: string) {
-    return request.put(`/files/${id}`, { fileName: newName })
+    return request.put(`/files/${id}`, { file_name: newName })
+}
+
+export function shareFile(id: number, payload: { userIds?: number[]; roleIds?: number[] }) {
+    return request.post(`/files/${id}/share`, {
+        user_ids: payload.userIds || [],
+        role_ids: payload.roleIds || [],
+    })
+}
+
+export function reviewFile(id: number, content: string) {
+    return request.post(`/files/${id}/review`, { content })
+}
+
+export function approveFile(id: number, content: string) {
+    return request.post(`/files/${id}/approve`, { content })
+}
+
+export function commentFile(id: number, content: string) {
+    return request.post(`/files/${id}/comment`, { content })
 }

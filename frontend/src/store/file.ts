@@ -1,5 +1,5 @@
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { getFiles, type FileItem } from '@/api/file'
 
 export const useFileStore = defineStore('file', () => {
@@ -8,34 +8,59 @@ export const useFileStore = defineStore('file', () => {
     const selectedFile = ref<FileItem | null>(null)
     const loading = ref(false)
 
-    async function loadFiles(parentId: number = 0) {
+    const currentParentId = computed(() => currentPath.value[currentPath.value.length - 1]?.id ?? 0)
+
+    async function loadFiles(parentId: number = currentParentId.value) {
         loading.value = true
         try {
-            const res: any = await getFiles(parentId)
-            files.value = res.data
+            files.value = await getFiles(parentId)
+            if (selectedFile.value) {
+                selectedFile.value = files.value.find((item) => item.id === selectedFile.value?.id) || null
+            }
         } finally {
             loading.value = false
         }
     }
 
-    function navigateToDir(file: FileItem) {
-        if (file.isDirectory) {
-            currentPath.value.push({ id: file.id, name: file.fileName })
-            loadFiles(file.id)
+    async function openDirectory(target: { id: number; fileName?: string; name?: string }) {
+        const index = currentPath.value.findIndex((item) => item.id === target.id)
+        if (index >= 0) {
+            currentPath.value = currentPath.value.slice(0, index + 1)
+        } else {
+            currentPath.value.push({
+                id: target.id,
+                name: target.fileName || target.name || `目录 ${target.id}`,
+            })
         }
+        selectedFile.value = null
+        await loadFiles(target.id)
     }
 
-    function navigateUp() {
-        if (currentPath.value.length > 1) {
-            currentPath.value.pop()
-            const parentId = currentPath.value[currentPath.value.length - 1].id
-            loadFiles(parentId)
-        }
+    async function openFileDirectory(file: FileItem) {
+        if (!file.isDirectory) return
+        await openDirectory({ id: file.id, fileName: file.fileName })
+    }
+
+    async function resetToRoot() {
+        currentPath.value = [{ id: 0, name: 'Root' }]
+        selectedFile.value = null
+        await loadFiles(0)
     }
 
     function selectFile(file: FileItem | null) {
         selectedFile.value = file
     }
 
-    return { currentPath, files, selectedFile, loading, loadFiles, navigateToDir, navigateUp, selectFile }
+    return {
+        currentPath,
+        currentParentId,
+        files,
+        selectedFile,
+        loading,
+        loadFiles,
+        openDirectory,
+        openFileDirectory,
+        resetToRoot,
+        selectFile,
+    }
 })

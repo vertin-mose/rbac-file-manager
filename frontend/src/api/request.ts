@@ -10,7 +10,15 @@ const request = axios.create({
     },
 })
 
-// Request interceptor - attach JWT token
+function clearAuthState() {
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    localStorage.removeItem('displayName')
+    localStorage.removeItem('roles')
+    localStorage.removeItem('roleInfo')
+    localStorage.removeItem('permissions')
+}
+
 request.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('token')
@@ -22,18 +30,17 @@ request.interceptors.request.use(
     (error) => Promise.reject(error),
 )
 
-// Response interceptor - handle errors
 request.interceptors.response.use(
     (response) => response.data,
     (error) => {
         const status = error.response?.status
-        const message = error.response?.data?.message || error.message
+        const message = error.response?.data?.detail || error.response?.data?.message || error.message
 
         switch (status) {
             case 401:
-                localStorage.removeItem('token')
+                clearAuthState()
                 router.push('/login')
-                ElMessage.error('登录已过期，请重新登录')
+                ElMessage.error('登录已失效，请重新登录')
                 break
             case 403:
                 ElMessage.error('权限不足')

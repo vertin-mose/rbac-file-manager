@@ -24,8 +24,13 @@ export function login(data: LoginRequest) {
     return request.post('/auth/login', data)
 }
 
-export function register(data: { username: string; password: string; displayName?: string }) {
-    return request.post('/auth/register', data)
+export function register(data: { username: string; password: string; displayName?: string; email?: string }) {
+    return request.post('/auth/register', {
+        username: data.username,
+        password: data.password,
+        display_name: data.displayName,
+        email: data.email,
+    })
 }
 
 export function logout() {

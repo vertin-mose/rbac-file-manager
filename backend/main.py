@@ -90,8 +90,8 @@ def api_register(data: dict, db: Session = Depends(get_db)):
 
 
 @app.post("/api/auth/logout")
-def api_logout(request: Request, db: Session = Depends(get_db)):
-    get_current_user(request)
+async def api_logout(request: Request, db: Session = Depends(get_db)):
+    await get_current_user(request)
     record_audit(db, request.state.user_id, request.state.username, "LOGOUT",
                  ip=get_client_ip(request))
     return ApiResponse.success(message="Logged out")
@@ -191,9 +191,9 @@ async def api_upload_file(request: Request, file: UploadFile = File(...),
 
 
 @app.post("/api/files/directory")
-def api_create_directory(data: dict, request: Request, db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:create")(request, db)
+async def api_create_directory(data: dict, request: Request, db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:create")(request, db)
     result = create_directory(db, data["file_name"], data.get("parent_id", 0),
                               request.state.user_id)
     record_audit(db, request.state.user_id, request.state.username, "CREATE_DIRECTORY",
@@ -202,10 +202,10 @@ def api_create_directory(data: dict, request: Request, db: Session = Depends(get
 
 
 @app.put("/api/files/{file_id}")
-def api_rename_file(file_id: int, data: dict, request: Request,
-                    db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:update")(request, db)
+async def api_rename_file(file_id: int, data: dict, request: Request,
+                          db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:update")(request, db)
     result = rename_file(db, file_id, data.get("file_name", ""))
     record_audit(db, request.state.user_id, request.state.username, "RENAME_FILE",
                  detail=f"Renamed file {file_id}")
@@ -213,9 +213,9 @@ def api_rename_file(file_id: int, data: dict, request: Request,
 
 
 @app.delete("/api/files/{file_id}")
-def api_delete_file(file_id: int, request: Request, db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:delete")(request, db)
+async def api_delete_file(file_id: int, request: Request, db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:delete")(request, db)
     delete_file(db, file_id)
     record_audit(db, request.state.user_id, request.state.username, "DELETE_FILE",
                  detail=f"Deleted file {file_id}")
@@ -223,10 +223,10 @@ def api_delete_file(file_id: int, request: Request, db: Session = Depends(get_db
 
 
 @app.post("/api/files/{file_id}/share")
-def api_share_file(file_id: int, data: dict, request: Request,
-                   db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:share")(request, db)
+async def api_share_file(file_id: int, data: dict, request: Request,
+                         db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:share")(request, db)
     share_file(db, file_id, data.get("user_ids", []), data.get("role_ids", []))
     record_audit(db, request.state.user_id, request.state.username, "SHARE_FILE",
                  detail=f"Shared file {file_id}")
@@ -234,30 +234,30 @@ def api_share_file(file_id: int, data: dict, request: Request,
 
 
 @app.post("/api/files/{file_id}/review")
-def api_review_file(file_id: int, data: dict, request: Request,
-                    db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:review")(request, db)
+async def api_review_file(file_id: int, data: dict, request: Request,
+                          db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:review")(request, db)
     record_audit(db, request.state.user_id, request.state.username, "REVIEW_FILE",
                  detail=f"Reviewed file {file_id}")
     return ApiResponse.success(message="Review submitted")
 
 
 @app.post("/api/files/{file_id}/approve")
-def api_approve_file(file_id: int, data: dict, request: Request,
-                     db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:approve")(request, db)
+async def api_approve_file(file_id: int, data: dict, request: Request,
+                           db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:approve")(request, db)
     record_audit(db, request.state.user_id, request.state.username, "APPROVE_FILE",
                  detail=f"Approved file {file_id}")
     return ApiResponse.success(message="File approved")
 
 
 @app.post("/api/files/{file_id}/comment")
-def api_comment_file(file_id: int, data: dict, request: Request,
-                     db: Session = Depends(get_db)):
-    get_current_user(request)
-    require_perm("doc:comment")(request, db)
+async def api_comment_file(file_id: int, data: dict, request: Request,
+                           db: Session = Depends(get_db)):
+    await get_current_user(request)
+    await require_perm("doc:comment")(request, db)
     record_audit(db, request.state.user_id, request.state.username, "COMMENT_FILE",
                  detail=f"Commented on file {file_id}")
     return ApiResponse.success(message="Comment added")

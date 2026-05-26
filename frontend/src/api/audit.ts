@@ -35,7 +35,9 @@ export async function getAuditLogs(params?: {
     page?: number
     size?: number
     action?: string
-    userId?: number
+    username?: string
+    startDate?: string
+    endDate?: string
 }): Promise<AuditLogPage> {
     const res: any = await request.get('/audit-logs', { params })
     return {
@@ -46,6 +48,19 @@ export async function getAuditLogs(params?: {
     }
 }
 
-export function exportAuditLogs() {
-    return request.get('/audit-logs/export', { responseType: 'blob' }) as Promise<Blob>
+export function deleteAuditLog(id: number) {
+    return request.delete(`/audit-logs/${id}`)
+}
+
+export function batchDeleteAuditLogs(ids: number[]) {
+    return request.delete('/audit-logs', { data: { ids } })
+}
+
+export function exportAuditLogs(params?: {
+    action?: string
+    username?: string
+    startDate?: string
+    endDate?: string
+}) {
+    return request.get('/audit-logs/export', { params, responseType: 'blob' }) as Promise<Blob>
 }

@@ -111,8 +111,14 @@ function handleLogout() {
 
 <style scoped>
 .layout-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: linear-gradient(180deg, #eff4f7 0%, #e6edf3 100%);
+}
+
+.el-container:last-child {
+  height: 100vh;
+  overflow: hidden;
 }
 
 .layout-aside {
@@ -121,6 +127,10 @@ function handleLogout() {
     radial-gradient(circle at top left, rgba(244, 204, 116, 0.18), transparent 24%),
     linear-gradient(180deg, #14324a 0%, #1d4860 48%, #28586d 100%);
   color: #fff;
+  height: 100vh;
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
 }
 
 .brand-block {
@@ -196,6 +206,8 @@ function handleLogout() {
 
 .layout-main {
   padding: 24px 28px;
+  overflow-y: auto;
+  height: calc(100vh - 84px);
 }
 
 @media (max-width: 960px) {

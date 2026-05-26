@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -15,7 +15,7 @@ from models import ApiResponse
 from services import (
     assign_permissions, assign_user_roles, create_directory, create_role,
     delete_file, delete_role, export_audit_logs, get_effective_permissions,
-    get_file, get_hierarchy, get_role, list_files, list_roles, login,
+    get_file, get_file_content, get_hierarchy, get_role, get_user_info, list_files, list_roles, login,
     query_audit_logs, record_audit, register, rename_file, share_file,
     update_role, upload_file,
 )
@@ -164,6 +164,12 @@ def api_assign_user_roles(user_id: int, data: dict, request: Request,
     return ApiResponse.success(message="User roles updated")
 
 
+@app.get("/api/users/{user_id}")
+def api_get_user(user_id: int, request: Request, db: Session = Depends(get_db),
+                  _=Depends(require_perm("role:read"))):
+    return ApiResponse.success(get_user_info(db, user_id))
+
+
 # ── File Routes ────────────────────────────────────────────────────────────
 
 @app.get("/api/files")
@@ -177,6 +183,14 @@ def api_list_files(parentId: int = Query(0), request: Request = None,
 def api_get_file(file_id: int, request: Request = None, db: Session = Depends(get_db),
                  _=Depends(require_perm("doc:read"))):
     return ApiResponse.success(get_file(db, file_id))
+
+
+@app.get("/api/files/{file_id}/download")
+def api_download_file(file_id: int, request: Request = None, db: Session = Depends(get_db),
+                       _=Depends(require_perm("doc:read"))):
+    content, mime_type, file_name = get_file_content(db, file_id)
+    return Response(content=content, media_type=mime_type,
+                    headers={"Content-Disposition": f'inline; filename="{file_name}"'})
 
 
 @app.post("/api/files")

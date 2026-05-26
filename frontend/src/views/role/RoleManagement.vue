@@ -109,12 +109,33 @@
         <div class="assign-box">
           <div class="assign-header">
             <h3>用户角色分配</h3>
-            <p>按用户 ID 提交角色关联。</p>
+            <p>输入用户 ID 查询用户信息后，选择角色并确认分配。</p>
           </div>
           <el-form label-position="top">
             <el-form-item label="用户 ID">
-              <el-input-number v-model="assignForm.userId" :min="1" controls-position="right" />
+              <el-input-number v-model="assignForm.userId" :min="1" controls-position="right" @change="handleUserIdChange" />
             </el-form-item>
+
+            <!-- Show matched user info -->
+            <el-alert
+              v-if="userInfo"
+              :title="userInfo.username"
+              :description="`显示名: ${userInfo.display_name || '--'} | 邮箱: ${userInfo.email || '--'} | 当前角色: ${userInfo.roles.map(r => r.name).join(', ') || '无'}`"
+              type="success"
+              show-icon
+              :closable="false"
+              class="user-info-alert"
+            />
+            <el-alert
+              v-if="userInfoError"
+              :title="userInfoError"
+              type="error"
+              show-icon
+              :closable="false"
+              class="user-info-alert"
+            />
+            <div v-if="userInfoLoading" class="user-info-loading">查询中...</div>
+
             <el-form-item label="角色">
               <el-select v-model="assignForm.roleIds" multiple filterable style="width: 100%">
                 <el-option v-for="role in roles" :key="role.id" :label="role.name" :value="role.id" />
@@ -123,7 +144,8 @@
             <el-button
               v-if="userStore.hasPermission('role:assign')"
               type="primary"
-              @click="submitAssignRoles"
+              @click="confirmAssignRoles"
+              :disabled="!userInfo"
             >
               保存分配
             </el-button>
@@ -185,7 +207,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { assignPermissions, assignUserRoles, createRole, deleteRole, getRoleHierarchy, getRoles, updateRole, type Role, type RoleHierarchyItem } from '@/api/role'
+import { assignPermissions, assignUserRoles, createRole, deleteRole, getRoleHierarchy, getRoles, getUserInfo, updateRole, type Role, type RoleHierarchyItem } from '@/api/role'
 import { PERMISSIONS, PERMISSION_GROUPS } from '@/constants/permissions'
 import { useUserStore } from '@/store/user'
 
@@ -194,8 +216,12 @@ const loading = ref(false)
 const roles = ref<Role[]>([])
 const hierarchy = ref<RoleHierarchyItem[]>([])
 
+const userInfo = ref<any>(null)
+const userInfoLoading = ref(false)
+const userInfoError = ref('')
+
 const assignForm = reactive({
-  userId: 1,
+  userId: 0,
   roleIds: [] as number[],
 })
 
@@ -309,11 +335,40 @@ async function confirmDelete(roleId: number, roleName: string) {
   await loadData()
 }
 
-async function submitAssignRoles() {
+async function handleUserIdChange() {
+  if (!assignForm.userId || assignForm.userId < 1) {
+    userInfo.value = null
+    userInfoError.value = ''
+    return
+  }
+  userInfoLoading.value = true
+  userInfo.value = null
+  userInfoError.value = ''
+  try {
+    userInfo.value = await getUserInfo(assignForm.userId)
+  } catch {
+    userInfoError.value = '未找到该用户'
+  } finally {
+    userInfoLoading.value = false
+  }
+}
+
+async function confirmAssignRoles() {
   if (!assignForm.userId || assignForm.roleIds.length === 0) {
     ElMessage.warning('请填写用户 ID 并选择角色')
     return
   }
+  if (!userInfo.value) {
+    ElMessage.warning('请先查询确认用户信息')
+    return
+  }
+  const currentRoles = userInfo.value.roles.map((r: any) => r.name).join(', ') || '无'
+  const newRoles = assignForm.roleIds.map((id: number) => roles.value.find(r => r.id === id)?.name || id).join(', ')
+  await ElMessageBox.confirm(
+    `将用户 "${userInfo.value.username}"（ID: ${assignForm.userId}）的角色从 [${currentRoles}] 变更为 [${newRoles}]，确认？`,
+    '角色分配确认',
+    { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' }
+  )
   await assignUserRoles(assignForm.userId, assignForm.roleIds)
   ElMessage.success('用户角色已更新')
 }
@@ -404,6 +459,16 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.user-info-alert {
+  margin-bottom: 8px;
+}
+
+.user-info-loading {
+  color: #909399;
+  font-size: 13px;
+  margin-bottom: 8px;
 }
 
 .permission-grid {

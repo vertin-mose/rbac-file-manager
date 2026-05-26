@@ -7,7 +7,7 @@
         <p class="hero-copy">根据当前账户的权限范围，快速了解系统资源与访问级别。</p>
       </div>
       <div class="hero-tags">
-        <el-tag effect="dark" type="primary">用户：{{ userStore.displayName || userStore.username }}</el-tag>
+        <el-tag effect="dark" type="primary">用户：{{ userStore.username }}</el-tag>
         <el-tag effect="plain">角色：{{ userStore.roleDisplayName || '未分配' }}</el-tag>
       </div>
     </section>
@@ -53,8 +53,8 @@
           <el-descriptions-item label="用户名">
             {{ userStore.username }}
           </el-descriptions-item>
-          <el-descriptions-item label="显示名">
-            {{ userStore.displayName || '--' }}
+          <el-descriptions-item label="用户 ID">
+            {{ userStore.userId || '--' }}
           </el-descriptions-item>
           <el-descriptions-item label="角色列表">
             {{ userStore.roles.join(', ') || '--' }}

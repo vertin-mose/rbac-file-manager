@@ -2,6 +2,7 @@
 
 import csv
 import io
+import os
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -118,7 +119,7 @@ def login(db: Session, username: str, password: str, ip: str = "") -> dict:
     token = create_token(user.id, user.username, role_names)
     record_audit(db, user.id, user.username, "LOGIN", detail="Login successful", ip=ip)
 
-    return {"token": token, "username": user.username, "display_name": user.display_name,
+    return {"token": token, "user_id": user.id, "username": user.username, "display_name": user.display_name,
             "roles": role_names,
             "role_info": [
                 {"name": r, "display_name": ROLE_DISPLAY.get(r, r), "level": ROLE_LEVEL.get(r, 99)}
@@ -142,6 +143,13 @@ def register(db: Session, username: str, password: str,
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Assign the VIEWER role by default
+    viewer_role = db.query(Role).filter(Role.name == "VIEWER", Role.deleted == False).first()
+    if viewer_role:
+        user.roles = [viewer_role]
+        db.commit()
+
     return {"id": user.id, "username": user.username,
             "display_name": user.display_name, "email": user.email}
 
@@ -256,6 +264,20 @@ def get_hierarchy(db: Session) -> list[dict]:
     return result
 
 
+def get_user_info(db: Session, user_id: int) -> dict:
+    user = db.get(User, user_id)
+    if not user or user.deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "id": user.id,
+        "username": user.username,
+        "display_name": user.display_name,
+        "email": user.email,
+        "enabled": user.enabled,
+        "roles": [{"id": r.id, "name": r.name, "description": r.description} for r in user.roles if not r.deleted],
+    }
+
+
 def assign_user_roles(db: Session, user_id: int, role_ids: list[int]):
     user = db.get(User, user_id)
     if not user or user.deleted:
@@ -281,7 +303,7 @@ def _file_to_dict(f: FileRecord) -> dict:
     return {
         "id": f.id, "file_name": f.file_name, "is_directory": f.is_directory,
         "size": f.size or 0, "mime_type": f.mime_type, "owner_id": f.owner_id,
-        "parent_id": f.parent_id,
+        "parent_id": f.parent_id, "storage_url": f.storage_url or "",
         "created_at": f.created_at.isoformat() if f.created_at else None,
         "updated_at": f.updated_at.isoformat() if f.updated_at else None,
     }
@@ -305,6 +327,14 @@ async def upload_file(db: Session, file: UploadFile, parent_id: int, owner_id: i
         minio_client.put_object(settings.MINIO_BUCKET, storage_name,
                                 io.BytesIO(content), len(content))
         storage_url = f"{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{storage_name}"
+    else:
+        # Local fallback when MinIO is not configured
+        local_dir = os.path.join(os.path.dirname(__file__), "storage")
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, storage_name)
+        with open(local_path, "wb") as f:
+            f.write(content)
+        storage_url = f"local://{storage_name}"
 
     f = FileRecord(
         file_name=file.filename or "unnamed",
@@ -338,6 +368,49 @@ def rename_file(db: Session, file_id: int, new_name: str) -> dict:
     db.commit()
     db.refresh(f)
     return _file_to_dict(f)
+
+
+def get_file_content(db: Session, file_id: int) -> tuple[bytes, str, str]:
+    """Return (content_bytes, mime_type, file_name) for a file record."""
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    if f.is_directory:
+        raise HTTPException(status_code=400, detail="Cannot download a directory")
+
+    if not f.storage_url:
+        raise HTTPException(status_code=501, detail="文件内容不可用：上传时未连接 MinIO 存储服务，文件未实际保存")
+
+    # Local file system fallback
+    if f.storage_url.startswith("local://"):
+        local_dir = os.path.join(os.path.dirname(__file__), "storage")
+        local_path = os.path.join(local_dir, f.storage_url[len("local://"):])
+        if not os.path.exists(local_path):
+            raise HTTPException(status_code=501, detail="文件内容不可用：本地存储文件已被删除")
+        with open(local_path, "rb") as fh:
+            content = fh.read()
+        return content, f.mime_type or "application/octet-stream", f.file_name
+
+    # Try to read from MinIO
+    minio_client = get_minio_client()
+    if not minio_client:
+        raise HTTPException(status_code=501, detail="文件内容不可用：MinIO 存储服务未启动，请联系管理员")
+
+    try:
+        path = f.storage_url.replace(settings.MINIO_ENDPOINT, "").strip("/")
+        parts = path.split("/", 1)
+        if len(parts) != 2:
+            raise HTTPException(status_code=501, detail="文件存储路径异常")
+        bucket, object_name = parts
+        response = minio_client.get_object(bucket, object_name)
+        content = response.read()
+        response.close()
+        response.release_conn()
+        return content, f.mime_type or "application/octet-stream", f.file_name
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=501, detail="文件内容不可用：读取存储服务时出错")
 
 
 def delete_file(db: Session, file_id: int):

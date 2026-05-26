@@ -8,6 +8,7 @@ export interface FileItem {
     mimeType: string
     ownerId: number
     parentId: number | null
+    storageUrl: string
     createdAt: string | null
     updatedAt: string | null
 }
@@ -21,6 +22,7 @@ function mapFileItem(item: any): FileItem {
         mimeType: item.mime_type || '',
         ownerId: item.owner_id,
         parentId: item.parent_id ?? null,
+        storageUrl: item.storage_url || '',
         createdAt: item.created_at ?? null,
         updatedAt: item.updated_at ?? null,
     }
@@ -41,7 +43,7 @@ export function uploadFile(file: File, parentId: number) {
     formData.append('file', file)
     formData.append('parentId', String(parentId))
     return request.post('/files', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
     })
 }
 
@@ -74,4 +76,15 @@ export function approveFile(id: number, content: string) {
 
 export function commentFile(id: number, content: string) {
     return request.post(`/files/${id}/comment`, { content })
+}
+
+export async function downloadFile(id: number): Promise<Blob> {
+    const res = await request.get(`/files/${id}/download`, {
+        responseType: 'blob',
+    })
+    return res as unknown as Blob
+}
+
+export function getDownloadUrl(id: number): string {
+    return `/api/files/${id}/download`
 }

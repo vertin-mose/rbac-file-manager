@@ -19,14 +19,19 @@
           >
             新建目录
           </el-button>
-          <el-upload
+          <el-button
             v-if="userStore.hasPermission('doc:create')"
-            :show-file-list="false"
-            :auto-upload="false"
-            :on-change="handleUploadChange"
+            type="success"
+            @click="triggerFileUpload"
           >
-            <el-button type="success">上传文件</el-button>
-          </el-upload>
+            上传文件
+          </el-button>
+          <input
+            ref="fileInputRef"
+            type="file"
+            style="display: none"
+            @change="handleFileInputChange"
+          />
           <el-button :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
         </div>
       </section>
@@ -89,12 +94,14 @@
             >
               <el-table-column label="名称" min-width="260">
                 <template #default="{ row }">
-                  <div class="name-cell">
+                  <div class="name-cell"
+                    @click.stop="handleViewFile(row)"
+                    @dblclick.stop="handleRowDoubleClick(row)">
                     <el-icon :color="row.isDirectory ? '#c78d2a' : '#4f6b88'">
                       <Folder v-if="row.isDirectory" />
                       <Document v-else />
                     </el-icon>
-                    <span>{{ row.fileName }}</span>
+                    <span class="file-name-text">{{ row.fileName }}</span>
                   </div>
                 </template>
               </el-table-column>
@@ -127,6 +134,14 @@
                       @click.stop="fileStore.openFileDirectory(row)"
                     >
                       打开
+                    </el-button>
+                    <el-button
+                      v-if="!row.isDirectory"
+                      link
+                      type="primary"
+                      @click.stop="handleViewFile(row)"
+                    >
+                      查看
                     </el-button>
                     <el-button
                       v-if="userStore.hasPermission('doc:update')"
@@ -260,7 +275,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type UploadFile as ElUploadFile } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Folder } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
 import {
@@ -268,6 +283,7 @@ import {
   commentFile,
   createDirectory,
   deleteFile,
+  downloadFile,
   renameFile,
   reviewFile,
   shareFile,
@@ -283,6 +299,7 @@ type ActionMode = 'share' | 'review' | 'approve' | 'comment'
 const fileStore = useFileStore()
 const userStore = useUserStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const dialogs = reactive({
   create: {
@@ -450,6 +467,8 @@ function handleRowClick(row: FileItem) {
 async function handleRowDoubleClick(row: FileItem) {
   if (row.isDirectory) {
     await fileStore.openFileDirectory(row)
+  } else {
+    handleViewFile(row)
   }
 }
 
@@ -457,10 +476,49 @@ async function handleTreeSelect(payload: { id: number; name: string }) {
   await fileStore.openDirectory(payload)
 }
 
-async function handleUploadChange(file: ElUploadFile) {
-  if (!file.raw) return
-  await uploadFile(file.raw, fileStore.currentParentId)
-  ElMessage.success('文件上传成功')
+async function handleViewFile(row: FileItem) {
+  if (row.isDirectory) {
+    await fileStore.openFileDirectory(row)
+  } else {
+    try {
+      const blob = await downloadFile(row.id)
+      let url: string
+      // Fix charset for text files to prevent garbled Chinese
+      const mime = blob.type || ''
+      if (/^text\//.test(mime)) {
+        const text = await blob.text()
+        const fixedBlob = new Blob([text], { type: `${mime.split(';')[0]};charset=utf-8` })
+        url = window.URL.createObjectURL(fixedBlob)
+      } else {
+        url = window.URL.createObjectURL(blob)
+      }
+      window.open(url, '_blank')
+    } catch (e: any) {
+      const detail = e?.response?.data?.message || e?.response?.data?.detail || ''
+      ElMessage.error(detail || '文件无法查看')
+    }
+  }
+}
+
+function triggerFileUpload() {
+  fileInputRef.value?.click()
+}
+
+async function handleFileInputChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  try {
+    await uploadFile(file, fileStore.currentParentId)
+    ElMessage.success('文件上传成功')
+  } catch {
+    ElMessage.error('上传失败')
+  }
+
+  // Reset input so the same file can be re-uploaded
+  input.value = ''
+
   await refreshAll()
 }
 
@@ -568,6 +626,16 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  cursor: pointer;
+}
+
+.file-name-text {
+  text-decoration: none;
+  transition: text-decoration 0.15s;
+}
+
+.name-cell:hover .file-name-text {
+  text-decoration: underline;
 }
 
 @media (max-width: 1080px) {

@@ -82,3 +82,15 @@ export function assignPermissions(roleId: number, permissionIds: number[]) {
 export function assignUserRoles(userId: number, roleIds: number[]) {
     return request.put(`/users/${userId}/roles`, { role_ids: roleIds })
 }
+
+export async function getUserInfo(userId: number): Promise<{
+    id: number
+    username: string
+    display_name: string | null
+    email: string | null
+    enabled: boolean
+    roles: { id: number; name: string; description: string }[]
+}> {
+    const res: any = await request.get(`/users/${userId}`)
+    return res.data
+}

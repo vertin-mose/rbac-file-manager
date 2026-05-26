@@ -4,6 +4,7 @@ import { login as apiLogin, type LoginRequest, type RoleInfo } from '@/api/auth'
 
 export const useUserStore = defineStore('user', () => {
     const token = ref(localStorage.getItem('token') || '')
+    const userId = ref(Number(localStorage.getItem('userId') || 0))
     const username = ref(localStorage.getItem('username') || '')
     const displayName = ref(localStorage.getItem('displayName') || '')
     const roles = ref<string[]>(JSON.parse(localStorage.getItem('roles') || '[]'))
@@ -13,12 +14,14 @@ export const useUserStore = defineStore('user', () => {
     async function login(credentials: LoginRequest) {
         const res: any = await apiLogin(credentials)
         token.value = res.data.token
+        userId.value = res.data.user_id || 0
         username.value = res.data.username
         displayName.value = res.data.display_name || ''
         roles.value = res.data.roles || []
         roleInfo.value = res.data.role_info || []
         permissions.value = res.data.permissions || []
         localStorage.setItem('token', res.data.token)
+        localStorage.setItem('userId', String(res.data.user_id || 0))
         localStorage.setItem('username', res.data.username)
         localStorage.setItem('displayName', res.data.display_name || '')
         localStorage.setItem('roles', JSON.stringify(res.data.roles || []))
@@ -28,12 +31,14 @@ export const useUserStore = defineStore('user', () => {
 
     function logout() {
         token.value = ''
+        userId.value = 0
         username.value = ''
         displayName.value = ''
         roles.value = []
         roleInfo.value = []
         permissions.value = []
         localStorage.removeItem('token')
+        localStorage.removeItem('userId')
         localStorage.removeItem('username')
         localStorage.removeItem('displayName')
         localStorage.removeItem('roles')
@@ -63,7 +68,7 @@ export const useUserStore = defineStore('user', () => {
     })
 
     return {
-        token, username, displayName, roles, roleInfo, permissions,
+        token, userId, username, displayName, roles, roleInfo, permissions,
         login, logout, hasRole, hasPermission,
         highestLevel, roleDisplayName,
     }

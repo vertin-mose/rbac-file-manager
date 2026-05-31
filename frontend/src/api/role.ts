@@ -94,3 +94,15 @@ export async function getUserInfo(userId: number): Promise<{
     const res: any = await request.get(`/users/${userId}`)
     return res.data
 }
+
+export interface UserBasic {
+    id: number
+    username: string
+    display_name: string | null
+    email: string | null
+}
+
+export async function listUsers(): Promise<UserBasic[]> {
+    const res: any = await request.get('/users')
+    return res.data || []
+}

@@ -120,7 +120,7 @@
             <el-alert
               v-if="userInfo"
               :title="userInfo.username"
-              :description="`显示名: ${userInfo.display_name || '--'} | 邮箱: ${userInfo.email || '--'} | 当前角色: ${userInfo.roles.map(r => r.name).join(', ') || '无'}`"
+              :description="`显示名: ${userInfo.display_name || '--'} | 邮箱: ${userInfo.email || '--'} | 当前角色: ${userInfo.roles.map((r: any) => r.name).join(', ') || '无'}`"
               type="success"
               show-icon
               :closable="false"

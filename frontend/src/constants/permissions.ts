@@ -23,6 +23,7 @@ export const PERMISSIONS: Permission[] = [
     { id: 20, name: 'audit:export', description: '导出审计日志', category: 'audit' },
     { id: 21, name: 'system:config', description: '修改系统配置', category: 'system' },
     { id: 22, name: 'system:backup', description: '系统备份恢复', category: 'system' },
+    { id: 23, name: 'file:permission:manage', description: '管理文件角色权限', category: 'file' },
 ]
 
 export const PERMISSION_GROUPS = ['document', 'user', 'role', 'audit', 'system'] as const

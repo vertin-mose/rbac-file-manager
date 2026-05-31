@@ -13,14 +13,12 @@
         </div>
         <div class="hero-actions">
           <el-button
-            v-if="userStore.hasPermission('doc:create')"
             type="primary"
             @click="openCreateDialog()"
           >
             新建目录
           </el-button>
           <el-button
-            v-if="userStore.hasPermission('doc:create')"
             type="success"
             @click="triggerFileUpload"
           >
@@ -40,9 +38,9 @@
         <el-card class="sidebar-card" shadow="never">
           <FileTree
             ref="fileTreeRef"
-            :can-create="userStore.hasPermission('doc:create')"
-            :can-update="userStore.hasPermission('doc:update')"
-            :can-delete="userStore.hasPermission('doc:delete')"
+            :can-create="true"
+            :can-update="true"
+            :can-delete="true"
             @select="handleTreeSelect"
             @create-root="openRootCreateDialog"
             @create-child="openCreateDialog"
@@ -74,12 +72,8 @@
                   <p>双击目录进入，单击选中项目后执行操作。</p>
                 </div>
                 <div class="action-tags">
-                  <el-tag v-if="userStore.hasPermission('doc:create')" effect="plain">创建</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:update')" effect="plain">编辑</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:delete')" effect="plain">删除</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:review')" effect="plain">审阅</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:approve')" effect="plain">审批</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:share')" effect="plain">共享</el-tag>
+                  <el-tag effect="plain">文件权限控制模式</el-tag>
+                  <el-tag v-if="userStore.hasPermission('file:permission:manage')" effect="plain">权限管理</el-tag>
                 </div>
               </div>
             </template>
@@ -144,47 +138,49 @@
                       查看
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:update')"
                       link
                       @click.stop="openRenameDialog({ id: row.id, label: row.fileName })"
                     >
                       重命名
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:share')"
                       link
-                      @click.stop="openActionDialog('share', row)"
+                      @click.stop="openPermissionDialog(row)"
                     >
                       共享
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:review')"
                       link
                       @click.stop="openActionDialog('review', row)"
                     >
                       审阅
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:approve')"
                       link
                       @click.stop="openActionDialog('approve', row)"
                     >
                       审批
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:comment')"
                       link
                       @click.stop="openActionDialog('comment', row)"
                     >
                       评论
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:delete')"
                       link
                       type="danger"
                       @click.stop="confirmDelete(row)"
                     >
                       删除
+                    </el-button>
+                    <el-button
+                      v-if="userStore.hasPermission('file:permission:manage')"
+                      link
+                      type="warning"
+                      @click.stop="openPermissionDialog(row)"
+                    >
+                      权限
                     </el-button>
                   </div>
                 </template>
@@ -242,29 +238,25 @@
       </template>
     </el-dialog>
 
+    <FilePermissionDialog
+      :visible="dialogs.permission.visible"
+      :file-id="dialogs.permission.fileId"
+      :file-name="dialogs.permission.fileName"
+      @close="dialogs.permission.visible = false"
+      @updated="refreshAll"
+    />
+
     <el-dialog v-model="dialogs.action.visible" :title="actionDialogTitle" width="500px">
-      <template v-if="dialogs.action.mode === 'share'">
-        <el-form label-position="top">
-          <el-form-item label="用户 ID 列表">
-            <el-input v-model="dialogs.action.userIdsText" placeholder="例如：1,2,3" />
-          </el-form-item>
-          <el-form-item label="角色 ID 列表">
-            <el-input v-model="dialogs.action.roleIdsText" placeholder="例如：4,5" />
-          </el-form-item>
-        </el-form>
-      </template>
-      <template v-else>
-        <el-form label-position="top">
-          <el-form-item label="说明">
-            <el-input
-              v-model="dialogs.action.content"
-              type="textarea"
-              :rows="4"
-              :placeholder="dialogs.action.mode === 'comment' ? '请输入评论内容' : '请输入处理说明'"
-            />
-          </el-form-item>
-        </el-form>
-      </template>
+      <el-form label-position="top">
+        <el-form-item label="说明">
+          <el-input
+            v-model="dialogs.action.content"
+            type="textarea"
+            :rows="4"
+            :placeholder="dialogs.action.mode === 'comment' ? '请输入评论内容' : '请输入处理说明'"
+          />
+        </el-form-item>
+      </el-form>
       <template #footer>
         <el-button @click="dialogs.action.visible = false">取消</el-button>
         <el-button type="primary" @click="submitAction">提交</el-button>
@@ -278,6 +270,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Folder } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
+import FilePermissionDialog from '@/components/FilePermissionDialog.vue'
 import {
   approveFile,
   commentFile,
@@ -286,7 +279,6 @@ import {
   downloadFile,
   renameFile,
   reviewFile,
-  shareFile,
   uploadFile,
   type FileItem,
 } from '@/api/file'
@@ -294,7 +286,7 @@ import { useFileStore } from '@/store/file'
 import { useUserStore } from '@/store/user'
 import { formatBytes, formatDateTime } from '@/utils/format'
 
-type ActionMode = 'share' | 'review' | 'approve' | 'comment'
+type ActionMode = 'review' | 'approve' | 'comment'
 
 const fileStore = useFileStore()
 const userStore = useUserStore()
@@ -315,18 +307,19 @@ const dialogs = reactive({
   },
   action: {
     visible: false,
-    mode: 'share' as ActionMode,
+    mode: 'review' as ActionMode,
     file: null as FileItem | null,
     content: '',
-    userIdsText: '',
-    roleIdsText: '',
+  },
+  permission: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
   },
 })
 
 const actionDialogTitle = computed(() => {
   switch (dialogs.action.mode) {
-    case 'share':
-      return '共享文件'
     case 'review':
       return '提交审阅'
     case 'approve':
@@ -399,26 +392,18 @@ function openActionDialog(mode: ActionMode, file: FileItem) {
   dialogs.action.mode = mode
   dialogs.action.file = file
   dialogs.action.content = ''
-  dialogs.action.userIdsText = ''
-  dialogs.action.roleIdsText = ''
 }
 
-function parseNumberList(text: string): number[] {
-  return text
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isInteger(item) && item > 0)
+function openPermissionDialog(file: FileItem) {
+  dialogs.permission.fileId = file.id
+  dialogs.permission.fileName = file.fileName
+  dialogs.permission.visible = true
 }
 
 async function submitAction() {
   if (!dialogs.action.file) return
 
-  if (dialogs.action.mode === 'share') {
-    await shareFile(dialogs.action.file.id, {
-      userIds: parseNumberList(dialogs.action.userIdsText),
-      roleIds: parseNumberList(dialogs.action.roleIdsText),
-    })
-  } else if (dialogs.action.mode === 'review') {
+  if (dialogs.action.mode === 'review') {
     await reviewFile(dialogs.action.file.id, dialogs.action.content)
   } else if (dialogs.action.mode === 'approve') {
     await approveFile(dialogs.action.file.id, dialogs.action.content)

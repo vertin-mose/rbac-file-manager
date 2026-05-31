@@ -31,7 +31,8 @@ INSERT INTO permissions (name, description, category) VALUES
 ('audit:export','Export audit logs',                       'audit'),
 -- System permissions
 ('system:config', 'Modify system configuration',           'system'),
-('system:backup', 'Perform system backup and restore',     'system');
+('system:backup', 'Perform system backup and restore',     'system'),
+('file:permission:manage', 'Manage file role permissions', 'file');
 
 
 -- === Roles (6 roles for Enterprise Document Management & Collaboration) ===
@@ -90,7 +91,8 @@ WHERE r.name = 'ADMIN' AND p.name IN (
     'user:create', 'user:update', 'user:delete',
     'role:create', 'role:update', 'role:delete', 'role:assign',
     'audit:export',
-    'system:backup'
+    'system:backup',
+    'file:permission:manage'
 );
 
 -- SUPER_ADMIN: system:config (inherits ADMIN = all permissions)

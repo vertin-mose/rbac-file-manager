@@ -6,9 +6,10 @@
         <h1>工作台总览</h1>
         <p class="hero-copy">根据当前账户的权限范围，快速了解系统资源与访问级别。</p>
       </div>
-      <div class="hero-tags">
-        <el-tag effect="dark" type="primary">用户：{{ userStore.username }}</el-tag>
-        <el-tag effect="plain">角色：{{ userStore.roleDisplayName || '未分配' }}</el-tag>
+      <div class="hero-meter">
+        <span>权限覆盖</span>
+        <strong>{{ permissionCoverageTotal }}%</strong>
+        <el-progress :percentage="permissionCoverageTotal" :show-text="false" :stroke-width="8" />
       </div>
     </section>
 
@@ -32,12 +33,36 @@
             </div>
           </div>
         </template>
-        <div class="tag-flow">
-          <el-tag v-for="permission in userStore.permissions" :key="permission" effect="plain">
-            {{ permission }}
-          </el-tag>
-          <el-empty v-if="userStore.permissions.length === 0" description="暂无权限数据" :image-size="60" />
+        <div class="permission-overview" v-if="effectivePermissions.length > 0">
+          <div class="coverage-list">
+            <div v-for="group in permissionCoverage" :key="group.category" class="coverage-row">
+              <span>{{ group.shortLabel }}</span>
+              <el-progress :percentage="group.percent" :show-text="false" :stroke-width="8" />
+              <strong>{{ group.count }}/{{ group.total }}</strong>
+            </div>
+          </div>
+
+          <div class="permission-list">
+            <section v-for="group in visiblePermissionGroups" :key="group.category" class="permission-group">
+              <div class="permission-group__header">
+                <span>{{ group.label }}</span>
+                <el-tag size="small" :type="group.tagType" effect="plain">{{ group.items.length }} 项</el-tag>
+              </div>
+              <div class="tag-flow">
+                <el-tag
+                  v-for="permission in group.items"
+                  :key="permission.name"
+                  :type="permission.tagType"
+                  effect="plain"
+                  :title="permission.description"
+                >
+                  {{ permission.displayName }}
+                </el-tag>
+              </div>
+            </section>
+          </div>
         </div>
+        <el-empty v-else description="暂无权限数据" :image-size="60" />
       </el-card>
 
       <el-card class="info-card" shadow="never">
@@ -57,7 +82,7 @@
             {{ userStore.userId || '--' }}
           </el-descriptions-item>
           <el-descriptions-item label="角色列表">
-            {{ userStore.roles.join(', ') || '--' }}
+            {{ roleDisplayNames || '--' }}
           </el-descriptions-item>
           <el-descriptions-item label="最高级别">
             L{{ userStore.highestLevel === 99 ? '--' : userStore.highestLevel }}
@@ -71,13 +96,59 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useUserStore } from '@/store/user'
+import { PERMISSIONS, PERMISSION_CATEGORY_META, PERMISSION_GROUPS, resolvePermission } from '@/constants/permissions'
 
 const userStore = useUserStore()
+
+const effectivePermissions = computed(() =>
+  Array.from(new Set(userStore.permissions)).map((permission) => resolvePermission(permission)),
+)
+
+const permissionGroups = computed(() =>
+  PERMISSION_GROUPS.map((category) => {
+    const meta = PERMISSION_CATEGORY_META[category]
+    const total = PERMISSIONS.filter((permission) => permission.category === category).length
+    const items = effectivePermissions.value.filter((permission) => permission.category === category)
+    return {
+      category,
+      label: meta.label,
+      shortLabel: meta.shortLabel,
+      tagType: meta.tagType,
+      total,
+      items,
+    }
+  }),
+)
+
+const visiblePermissionGroups = computed(() => permissionGroups.value.filter((group) => group.items.length > 0))
+
+const roleDisplayNames = computed(() => {
+  if (userStore.roleInfo.length > 0) {
+    return userStore.roleInfo.map((role) => role.display_name || role.name).join('、')
+  }
+  return userStore.roles.join('、')
+})
+
+const permissionCoverage = computed(() =>
+  permissionGroups.value.map((group) => ({
+    category: group.category,
+    shortLabel: group.shortLabel,
+    count: group.items.length,
+    total: group.total,
+    percent: group.total ? Math.round((group.items.length / group.total) * 100) : 0,
+  })),
+)
+
+const permissionCoverageTotal = computed(() => {
+  const knownPermissions = new Set(PERMISSIONS.map((permission) => permission.name))
+  const matchedCount = effectivePermissions.value.filter((permission) => knownPermissions.has(permission.name)).length
+  return Math.round((matchedCount / PERMISSIONS.length) * 100)
+})
 
 const cards = computed(() => [
   {
     title: '当前权限数',
-    value: userStore.permissions.length,
+    value: effectivePermissions.value.length,
     hint: '来自角色及继承权限',
   },
   {
@@ -109,12 +180,11 @@ const cards = computed(() => [
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 32px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(255, 214, 153, 0.18), transparent 30%),
-    linear-gradient(135deg, #23465d 0%, #2d6078 50%, #3b7d96 100%);
-  color: #f7fafc;
+  padding: 22px 24px;
+  border: 1px solid #dce6ee;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #eef6ff 54%, #f8f4e8 100%);
+  color: #1f3448;
 }
 
 .eyebrow {
@@ -122,7 +192,7 @@ const cards = computed(() => [
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255, 224, 174, 0.88);
+  color: #2f7d73;
 }
 
 .hero-card h1 {
@@ -133,19 +203,34 @@ const cards = computed(() => [
 .hero-copy {
   margin: 10px 0 0;
   line-height: 1.7;
-  color: rgba(247, 250, 252, 0.82);
+  color: #647789;
 }
 
-.hero-tags {
+.hero-meter {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  justify-content: center;
+  gap: 8px;
+  min-width: 180px;
+  padding: 14px 16px;
+  border: 1px solid rgba(47, 125, 115, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.hero-meter span {
+  color: #66788a;
+  font-size: 13px;
+}
+
+.hero-meter strong {
+  color: #1f3448;
+  font-size: 28px;
 }
 
 .metric-card,
 .info-card {
-  border-radius: 20px;
+  border-radius: 8px;
 }
 
 .metric-card {
@@ -190,6 +275,57 @@ const cards = computed(() => [
   gap: 8px;
 }
 
+.permission-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.coverage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f6f9fc;
+}
+
+.coverage-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  color: #506171;
+  font-size: 13px;
+}
+
+.coverage-row strong {
+  text-align: right;
+  color: #20384b;
+  font-weight: 700;
+}
+
+.permission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.permission-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #20384b;
+  font-weight: 700;
+}
+
 @media (max-width: 960px) {
   .hero-card,
   .info-grid {
@@ -197,8 +333,12 @@ const cards = computed(() => [
     flex-direction: column;
   }
 
-  .hero-tags {
-    align-items: flex-start;
+  .hero-meter {
+    min-width: 100%;
+  }
+
+  .permission-overview {
+    grid-template-columns: 1fr;
   }
 }
 </style>

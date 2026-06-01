@@ -15,6 +15,7 @@
           <el-button
             v-if="userStore.hasPermission('doc:create')"
             type="primary"
+            :icon="Plus"
             @click="openCreateDialog()"
           >
             新建目录
@@ -22,6 +23,7 @@
           <el-button
             v-if="userStore.hasPermission('doc:create')"
             type="success"
+            :icon="Upload"
             @click="triggerFileUpload"
           >
             上传文件
@@ -32,7 +34,7 @@
             style="display: none"
             @change="handleFileInputChange"
           />
-          <el-button :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
+          <el-button :icon="Refresh" :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
         </div>
       </section>
 
@@ -62,7 +64,7 @@
                   <a href="#" @click.prevent="fileStore.openDirectory(segment)">{{ segment.name }}</a>
                 </el-breadcrumb-item>
               </el-breadcrumb>
-              <el-tag type="info">当前目录 ID: {{ fileStore.currentParentId }}</el-tag>
+              <el-tag type="info" effect="plain">{{ fileStore.files.length }} 项内容</el-tag>
             </div>
           </el-card>
 
@@ -73,13 +75,9 @@
                   <h2>目录内容</h2>
                   <p>双击目录进入，单击选中项目后执行操作。</p>
                 </div>
-                <div class="action-tags">
-                  <el-tag v-if="userStore.hasPermission('doc:create')" effect="plain">创建</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:update')" effect="plain">编辑</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:delete')" effect="plain">删除</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:review')" effect="plain">审阅</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:approve')" effect="plain">审批</el-tag>
-                  <el-tag v-if="userStore.hasPermission('doc:share')" effect="plain">共享</el-tag>
+                <div class="ability-summary" :title="availableFileActions.join('、')">
+                  <strong>{{ availableFileActions.length }}</strong>
+                  <span>项可用操作</span>
                 </div>
               </div>
             </template>
@@ -108,7 +106,9 @@
 
               <el-table-column label="类型" min-width="140">
                 <template #default="{ row }">
-                  {{ row.isDirectory ? '目录' : row.mimeType || '文件' }}
+                  <el-tag :type="row.isDirectory ? 'warning' : 'info'" effect="plain">
+                    {{ row.isDirectory ? '目录' : fileTypeLabel(row.mimeType) }}
+                  </el-tag>
                 </template>
               </el-table-column>
 
@@ -276,7 +276,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Folder } from '@element-plus/icons-vue'
+import { Document, Folder, Plus, Refresh, Upload } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
 import {
   approveFile,
@@ -300,6 +300,20 @@ const fileStore = useFileStore()
 const userStore = useUserStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+
+const FILE_ACTIONS = [
+  { permission: 'doc:create', label: '创建' },
+  { permission: 'doc:update', label: '编辑' },
+  { permission: 'doc:delete', label: '删除' },
+  { permission: 'doc:review', label: '审阅' },
+  { permission: 'doc:approve', label: '审批' },
+  { permission: 'doc:share', label: '共享' },
+  { permission: 'doc:comment', label: '评论' },
+] as const
+
+const availableFileActions = computed(() =>
+  FILE_ACTIONS.filter((action) => userStore.hasPermission(action.permission)).map((action) => action.label),
+)
 
 const dialogs = reactive({
   create: {
@@ -408,6 +422,17 @@ function parseNumberList(text: string): number[] {
     .split(',')
     .map((item) => Number(item.trim()))
     .filter((item) => Number.isInteger(item) && item > 0)
+}
+
+function fileTypeLabel(mimeType: string) {
+  if (!mimeType) return '文件'
+  if (mimeType.includes('pdf')) return 'PDF'
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'Word'
+  if (mimeType.includes('sheet') || mimeType.includes('excel')) return '表格'
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '演示文稿'
+  if (mimeType.startsWith('image/')) return '图片'
+  if (mimeType.startsWith('text/')) return '文本'
+  return mimeType.split('/').pop()?.toUpperCase() || '文件'
 }
 
 async function submitAction() {
@@ -544,12 +569,11 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 32px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(197, 145, 56, 0.16), transparent 28%),
-    linear-gradient(135deg, #12324b 0%, #204e68 52%, #2f6e86 100%);
-  color: #f5f7fa;
+  padding: 22px 24px;
+  border: 1px solid #dce6ee;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #eef8f4 52%, #eef4ff 100%);
+  color: #1f3448;
 }
 
 .eyebrow {
@@ -557,7 +581,7 @@ onMounted(async () => {
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255, 222, 173, 0.84);
+  color: #18746b;
 }
 
 .page-hero h1 {
@@ -569,7 +593,7 @@ onMounted(async () => {
   margin: 10px 0 0;
   max-width: 560px;
   line-height: 1.7;
-  color: rgba(245, 247, 250, 0.8);
+  color: #647789;
 }
 
 .hero-actions {
@@ -588,7 +612,7 @@ onMounted(async () => {
 .sidebar-card,
 .breadcrumb-card,
 .table-card {
-  border-radius: 20px;
+  border-radius: 8px;
 }
 
 .main-column {
@@ -615,11 +639,27 @@ onMounted(async () => {
   color: #7c8b99;
 }
 
-.action-tags,
 .table-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.ability-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #dbe8f0;
+  border-radius: 8px;
+  background: #f7fafc;
+  color: #66788a;
+  white-space: nowrap;
+}
+
+.ability-summary strong {
+  color: #1f3448;
+  font-size: 20px;
 }
 
 .name-cell {

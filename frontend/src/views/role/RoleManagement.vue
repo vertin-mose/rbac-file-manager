@@ -7,10 +7,10 @@
         <p class="hero-copy">维护角色定义、权限矩阵和角色继承关系。</p>
       </div>
       <div class="hero-actions">
-        <el-button v-if="userStore.hasPermission('role:create')" type="primary" @click="openCreateDialog">
+        <el-button v-if="userStore.hasPermission('role:create')" type="primary" :icon="Plus" @click="openCreateDialog">
           新建角色
         </el-button>
-        <el-button @click="loadData" :loading="loading">刷新</el-button>
+        <el-button :icon="Refresh" @click="loadData" :loading="loading">刷新</el-button>
       </div>
     </section>
 
@@ -20,7 +20,7 @@
           <div class="table-header">
             <div>
               <h2>角色列表</h2>
-              <p>展示角色本身权限和继承权限。</p>
+              <p>合并展示直接权限与继承权限。</p>
             </div>
           </div>
         </template>
@@ -28,27 +28,35 @@
         <el-table :data="roles" v-loading="loading" row-key="id">
           <el-table-column prop="name" label="角色名" min-width="140" />
           <el-table-column prop="description" label="描述" min-width="220" />
-          <el-table-column label="自身权限" min-width="260">
+          <el-table-column label="权限覆盖" min-width="360">
             <template #default="{ row }">
-              <div class="tag-flow">
-                <el-tag v-for="perm in row.permissions" :key="perm.id" effect="plain">
-                  {{ perm.name }}
-                </el-tag>
+              <div class="permission-cell" v-if="hasAnyPermissions(row)">
+                <div class="permission-line" v-if="directPermissions(row).length">
+                  <span class="permission-line__label">直接</span>
+                  <el-tag
+                    v-for="perm in directPermissions(row)"
+                    :key="perm.name"
+                    :type="permissionTagType(perm)"
+                    effect="plain"
+                    :title="permissionDescription(perm)"
+                  >
+                    {{ permissionDisplayName(perm) }}
+                  </el-tag>
+                </div>
+                <div class="permission-line" v-if="inheritedPermissions(row).length">
+                  <span class="permission-line__label">继承</span>
+                  <el-tag
+                    v-for="perm in inheritedPermissions(row)"
+                    :key="`inherited-${perm.name}`"
+                    type="info"
+                    effect="plain"
+                    :title="permissionDescription(perm)"
+                  >
+                    {{ permissionDisplayName(perm) }}
+                  </el-tag>
+                </div>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="继承权限" min-width="260">
-            <template #default="{ row }">
-              <div class="tag-flow">
-                <el-tag
-                  v-for="perm in row.inheritedPermissions"
-                  :key="`inherited-${perm.id}`"
-                  type="info"
-                  effect="plain"
-                >
-                  {{ perm.name }}
-                </el-tag>
-              </div>
+              <el-tag v-else type="info" effect="plain">暂无权限</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" fixed="right">
@@ -120,7 +128,7 @@
             <el-alert
               v-if="userInfo"
               :title="userInfo.username"
-              :description="`显示名: ${userInfo.display_name || '--'} | 邮箱: ${userInfo.email || '--'} | 当前角色: ${userInfo.roles.map(r => r.name).join(', ') || '无'}`"
+              :description="formatUserInfoDescription(userInfo)"
               type="success"
               show-icon
               :closable="false"
@@ -162,7 +170,7 @@
         <el-form-item label="描述">
           <el-input v-model="roleDialog.form.description" type="textarea" :rows="3" />
         </el-form-item>
-        <el-form-item label="权限">
+        <el-form-item v-if="!roleDialog.editingId" label="初始权限">
           <el-checkbox-group v-model="roleDialog.form.permissionIds" class="permission-grid">
             <div v-for="group in permissionGroups" :key="group" class="permission-group">
               <h4>{{ categoryLabel(group) }}</h4>
@@ -171,7 +179,10 @@
                 :key="permission.id"
                 :label="permission.id"
               >
-                {{ permission.name }}
+                <span class="permission-option">
+                  <span>{{ permissionDisplayName(permission) }}</span>
+                  <small>{{ permission.description }}</small>
+                </span>
               </el-checkbox>
             </div>
           </el-checkbox-group>
@@ -192,7 +203,10 @@
             :key="permission.id"
             :label="permission.id"
           >
-            {{ permission.name }}
+            <span class="permission-option">
+              <span>{{ permissionDisplayName(permission) }}</span>
+              <small>{{ permission.description }}</small>
+            </span>
           </el-checkbox>
         </div>
       </el-checkbox-group>
@@ -207,8 +221,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { assignPermissions, assignUserRoles, createRole, deleteRole, getRoleHierarchy, getRoles, getUserInfo, updateRole, type Role, type RoleHierarchyItem } from '@/api/role'
-import { PERMISSIONS, PERMISSION_GROUPS } from '@/constants/permissions'
+import { Plus, Refresh } from '@element-plus/icons-vue'
+import { assignPermissions, assignUserRoles, createRole, deleteRole, getRoleHierarchy, getRoles, getUserInfo, updateRole, type Permission, type Role, type RoleHierarchyItem } from '@/api/role'
+import { PERMISSIONS, PERMISSION_GROUPS, permissionCategoryLabel, permissionDescription, permissionDisplayName, permissionTagType } from '@/constants/permissions'
 import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
@@ -251,14 +266,38 @@ const permissionsByGroup = computed(() =>
 )
 
 function categoryLabel(category: string) {
-  const labels: Record<string, string> = {
-    document: '文档权限',
-    user: '用户权限',
-    role: '角色权限',
-    audit: '审计权限',
-    system: '系统权限',
-  }
-  return labels[category] || category
+  return permissionCategoryLabel(category)
+}
+
+function dedupePermissions(permissions: Permission[]) {
+  const seen = new Set<string>()
+  return permissions.filter((permission) => {
+    if (seen.has(permission.name)) return false
+    seen.add(permission.name)
+    return true
+  })
+}
+
+function directPermissions(role: Role) {
+  return dedupePermissions(role.permissions)
+}
+
+function inheritedPermissions(role: Role) {
+  const directNames = new Set(role.permissions.map((permission) => permission.name))
+  return dedupePermissions(role.inheritedPermissions).filter((permission) => !directNames.has(permission.name))
+}
+
+function hasAnyPermissions(role: Role) {
+  return directPermissions(role).length > 0 || inheritedPermissions(role).length > 0
+}
+
+function formatUserInfoDescription(info: {
+  display_name?: string | null
+  email?: string | null
+  roles?: Array<{ name: string }>
+}) {
+  const roleNames = info.roles?.map((role) => role.name).join(', ') || '无'
+  return `显示名: ${info.display_name || '--'} | 邮箱: ${info.email || '--'} | 当前角色: ${roleNames}`
 }
 
 async function loadData() {
@@ -387,12 +426,11 @@ onMounted(loadData)
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 32px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(219, 175, 73, 0.18), transparent 28%),
-    linear-gradient(135deg, #273746 0%, #39566a 52%, #4c6d82 100%);
-  color: #f8fafc;
+  padding: 22px 24px;
+  border: 1px solid #dce6ee;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #f1f7fb 52%, #f8f1e8 100%);
+  color: #1f3448;
 }
 
 .eyebrow {
@@ -400,7 +438,7 @@ onMounted(loadData)
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(248, 220, 174, 0.9);
+  color: #8a5d16;
 }
 
 .page-hero h1 {
@@ -411,7 +449,7 @@ onMounted(loadData)
 .hero-copy {
   margin: 10px 0 0;
   line-height: 1.7;
-  color: rgba(248, 250, 252, 0.78);
+  color: #647789;
 }
 
 .hero-actions {
@@ -428,7 +466,7 @@ onMounted(loadData)
 
 .table-card,
 .sidebar-card {
-  border-radius: 20px;
+  border-radius: 8px;
 }
 
 .table-header {
@@ -455,6 +493,26 @@ onMounted(loadData)
   gap: 6px;
 }
 
+.permission-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.permission-line__label {
+  min-width: 34px;
+  color: #66788a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .assign-box {
   display: flex;
   flex-direction: column;
@@ -474,14 +532,15 @@ onMounted(loadData)
 .permission-grid {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
 }
 
 .permission-group {
   padding: 16px;
-  border-radius: 16px;
-  background: #f6f9fb;
+  border: 1px solid #e1e9f0;
+  border-radius: 8px;
+  background: #f7fafc;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -492,8 +551,24 @@ onMounted(loadData)
   color: #213547;
 }
 
+.permission-option {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.permission-option small {
+  color: #81909f;
+  font-size: 12px;
+}
+
 @media (max-width: 1120px) {
-  .page-hero,
+  .page-hero {
+    flex-direction: column;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
   }

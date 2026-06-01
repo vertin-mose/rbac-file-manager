@@ -44,8 +44,8 @@
     <el-container>
       <el-header class="layout-header">
         <div class="header-intro">
-          <h1>{{ currentTitle }}</h1>
-          <p>基于角色权限控制的文档协作平台</p>
+          <span class="module-label">{{ currentTitle }}</span>
+          <span class="header-subtitle">文档权限工作台</span>
         </div>
 
         <div class="header-actions">
@@ -113,7 +113,7 @@ function handleLogout() {
 .layout-shell {
   height: 100vh;
   overflow: hidden;
-  background: linear-gradient(180deg, #eff4f7 0%, #e6edf3 100%);
+  background: #f3f6fa;
 }
 
 .el-container:last-child {
@@ -123,9 +123,7 @@ function handleLogout() {
 
 .layout-aside {
   padding: 20px 16px;
-  background:
-    radial-gradient(circle at top left, rgba(244, 204, 116, 0.18), transparent 24%),
-    linear-gradient(180deg, #14324a 0%, #1d4860 48%, #28586d 100%);
+  background: linear-gradient(180deg, #123049 0%, #17435b 52%, #245667 100%);
   color: #fff;
   height: 100vh;
   overflow-y: auto;
@@ -157,7 +155,7 @@ function handleLogout() {
 
 .layout-menu :deep(.el-menu-item) {
   margin: 6px 0;
-  border-radius: 14px;
+  border-radius: 8px;
 }
 
 .layout-menu :deep(.el-menu-item.is-active) {
@@ -169,21 +167,31 @@ function handleLogout() {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  min-height: 84px;
-  padding: 16px 28px;
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(18px);
+  min-height: 68px;
+  padding: 12px 28px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid rgba(20, 50, 74, 0.08);
 }
 
-.header-intro h1 {
-  margin: 0;
-  font-size: 26px;
-  color: #1e3447;
+.header-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.header-intro p {
-  margin: 6px 0 0;
+.module-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #edf6f4;
+  color: #176f67;
+  font-weight: 700;
+}
+
+.header-subtitle {
   color: #718293;
 }
 
@@ -198,16 +206,17 @@ function handleLogout() {
   align-items: center;
   gap: 6px;
   padding: 10px 14px;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #fff;
   cursor: pointer;
   color: #1e3447;
+  border: 1px solid #e2e8ef;
 }
 
 .layout-main {
   padding: 24px 28px;
   overflow-y: auto;
-  height: calc(100vh - 84px);
+  height: calc(100vh - 68px);
 }
 
 @media (max-width: 960px) {

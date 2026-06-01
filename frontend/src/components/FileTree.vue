@@ -12,7 +12,7 @@
 
     <div class="tree-root" @click="selectRoot">
       <el-icon><FolderOpened /></el-icon>
-      <span>Root</span>
+      <span>全部文件</span>
     </div>
 
     <el-tree
@@ -127,7 +127,7 @@ function handleNodeClick(node: TreeNode) {
 }
 
 function selectRoot() {
-  emit('select', { id: 0, name: 'Root' })
+  emit('select', { id: 0, name: '全部文件' })
 }
 
 defineExpose({ reload: loadTree })
@@ -165,7 +165,7 @@ onMounted(loadTree)
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #f6f9fb;
   cursor: pointer;
   color: #28445c;

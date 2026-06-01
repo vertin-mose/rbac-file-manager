@@ -105,7 +105,8 @@ ROLE_DESCRIPTION = {
 def login(db: Session, username: str, password: str, ip: str = "") -> dict:
     user = db.query(User).filter(User.username == username, User.deleted == False).first()
     if not user or not verify_password(password, user.password):
-        record_audit(db, user.id if user else 0, username, "LOGIN_FAILED", ip=ip, success=False)
+        record_audit(db, user.id if user else 0, username, "LOGIN_FAILED",
+                     detail=f"用户{username}登录失败", ip=ip, success=False)
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.enabled:
         raise HTTPException(status_code=403, detail="Account disabled")
@@ -117,7 +118,7 @@ def login(db: Session, username: str, password: str, ip: str = "") -> dict:
         all_perms |= get_effective_permissions(r.id, db)
 
     token = create_token(user.id, user.username, role_names)
-    record_audit(db, user.id, user.username, "LOGIN", detail="Login successful", ip=ip)
+    record_audit(db, user.id, user.username, "LOGIN", detail=f"用户{user.username}已登录", ip=ip)
 
     return {"token": token, "user_id": user.id, "username": user.username, "display_name": user.display_name,
             "roles": role_names,
@@ -444,12 +445,17 @@ def share_file(db: Session, file_id: int, user_ids: list[int], role_ids: list[in
 # ── Audit Service ──────────────────────────────────────────────────────────
 
 def query_audit_logs(db: Session, page: int = 1, size: int = 20,
-                     action: str = None, user_id: int = None) -> dict:
+                     action: str = None, username: str = None,
+                     start_date: str = None, end_date: str = None) -> dict:
     q = db.query(AuditLog).filter(AuditLog.deleted == False)
     if action:
         q = q.filter(AuditLog.action == action)
-    if user_id:
-        q = q.filter(AuditLog.user_id == user_id)
+    if username:
+        q = q.filter(AuditLog.username.like(f"%{username}%"))
+    if start_date:
+        q = q.filter(AuditLog.created_at >= f"{start_date} 00:00:00")
+    if end_date:
+        q = q.filter(AuditLog.created_at <= f"{end_date} 23:59:59")
     total = q.count()
     q = q.order_by(desc(AuditLog.created_at)).offset((page - 1) * size).limit(size)
     items = []
@@ -463,9 +469,33 @@ def query_audit_logs(db: Session, page: int = 1, size: int = 20,
     return {"items": items, "total": total, "page": page, "size": size}
 
 
-def export_audit_logs(db: Session) -> str:
-    logs = db.query(AuditLog).filter(AuditLog.deleted == False).order_by(
-        desc(AuditLog.created_at)).all()
+def delete_audit_log(db: Session, log_id: int):
+    log = db.get(AuditLog, log_id)
+    if not log or log.deleted:
+        raise HTTPException(status_code=404, detail="Audit log not found")
+    log.deleted = True
+    db.commit()
+
+
+def batch_delete_audit_logs(db: Session, log_ids: list[int]):
+    db.query(AuditLog).filter(
+        AuditLog.id.in_(log_ids), AuditLog.deleted == False
+    ).update({"deleted": True}, synchronize_session=False)
+    db.commit()
+
+
+def export_audit_logs(db: Session, action: str = None, username: str = None,
+                      start_date: str = None, end_date: str = None) -> str:
+    q = db.query(AuditLog).filter(AuditLog.deleted == False)
+    if action:
+        q = q.filter(AuditLog.action == action)
+    if username:
+        q = q.filter(AuditLog.username.like(f"%{username}%"))
+    if start_date:
+        q = q.filter(AuditLog.created_at >= f"{start_date} 00:00:00")
+    if end_date:
+        q = q.filter(AuditLog.created_at <= f"{end_date} 23:59:59")
+    logs = q.order_by(desc(AuditLog.created_at)).all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["ID", "UserID", "Username", "Action", "Detail", "IP", "Success", "CreatedAt"])

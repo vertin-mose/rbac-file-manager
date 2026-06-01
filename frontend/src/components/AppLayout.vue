@@ -80,6 +80,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
+import { logout as apiLogout } from '@/api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -103,7 +104,8 @@ const currentTitle = computed(() => {
   return map[route.path] || '文档管理系统'
 })
 
-function handleLogout() {
+async function handleLogout() {
+  await apiLogout()
   userStore.logout()
   router.push('/login')
 }

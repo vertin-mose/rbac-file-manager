@@ -33,8 +33,8 @@
             <el-option v-for="action in actionOptions" :key="action.value" :label="action.label" :value="action.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="用户 ID">
-          <el-input-number v-model="filters.userId" :min="1" controls-position="right" />
+        <el-form-item label="用户名称">
+          <el-input v-model="filters.username" clearable placeholder="输入用户名" style="width: 180px" />
         </el-form-item>
         <el-form-item label="日期范围">
           <el-date-picker
@@ -51,12 +51,24 @@
           <el-button :icon="RefreshLeft" @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
-      <p class="filter-note">日期范围为前端本地过滤，当前后端接口仅支持按操作类型和用户 ID 查询。</p>
     </el-card>
 
     <el-card class="table-card" shadow="never">
-      <el-table :data="displayLogs" v-loading="loading" row-key="id">
-        <el-table-column prop="id" label="ID" width="80" />
+      <div v-if="selectedIds.length > 0" class="batch-actions">
+        <span>已选择 {{ selectedIds.length }} 条</span>
+        <el-popconfirm title="确定批量删除所选日志？" @confirm="handleBatchDelete">
+          <template #reference>
+            <el-button type="danger" size="small">批量删除</el-button>
+          </template>
+        </el-popconfirm>
+      </div>
+      <el-table :data="rawLogs" v-loading="loading" row-key="id" @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="50" />
+        <el-table-column label="序号" width="80">
+          <template #default="{ $index }">
+            {{ (pagination.page - 1) * pagination.size + $index + 1 }}
+          </template>
+        </el-table-column>
         <el-table-column prop="username" label="用户" min-width="140" />
         <el-table-column label="操作" min-width="160">
           <template #default="{ row }">
@@ -78,14 +90,18 @@
             {{ formatDateTime(row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="详情" min-width="320">
+        <el-table-column prop="detail" label="详情" min-width="280">
           <template #default="{ row }">
-            <el-popover placement="top-start" width="320" trigger="click">
+            <span>{{ row.detail || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-popconfirm title="确定删除该条日志？" @confirm="handleDelete(row.id)">
               <template #reference>
-                <el-button link type="primary">查看详情</el-button>
+                <el-button type="danger" size="small" link>删除</el-button>
               </template>
-              <div class="detail-text">{{ row.detail || '无详情' }}</div>
-            </el-popover>
+            </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -106,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Refresh, RefreshLeft, Search } from '@element-plus/icons-vue'
 import { exportAuditLogs, getAuditLogs, type AuditLogItem } from '@/api/audit'
@@ -116,10 +132,11 @@ import { formatDateTime } from '@/utils/format'
 const userStore = useUserStore()
 const loading = ref(false)
 const rawLogs = ref<AuditLogItem[]>([])
+const selectedIds = ref<number[]>([])
 
 const filters = reactive({
   action: '',
-  userId: undefined as number | undefined,
+  username: '',
   dateRange: [] as string[],
 })
 
@@ -179,11 +196,14 @@ const auditStats = computed(() => {
 async function loadLogs() {
   loading.value = true
   try {
+    const [start, end] = filters.dateRange
     const result = await getAuditLogs({
       page: pagination.page,
       size: pagination.size,
       action: filters.action || undefined,
-      userId: filters.userId,
+      username: filters.username || undefined,
+      startDate: start || undefined,
+      endDate: end || undefined,
     })
     rawLogs.value = result.items
     pagination.total = result.total
@@ -199,7 +219,7 @@ async function applyFilters() {
 
 async function resetFilters() {
   filters.action = ''
-  filters.userId = undefined
+  filters.username = ''
   filters.dateRange = []
   pagination.page = 1
   await loadLogs()
@@ -210,8 +230,40 @@ async function handleSizeChange() {
   await loadLogs()
 }
 
+async function handleDelete(id: number) {
+  try {
+    await deleteAuditLog(id)
+    ElMessage.success('删除成功')
+    selectedIds.value = []
+    await loadLogs()
+  } catch {
+    ElMessage.error('删除失败')
+  }
+}
+
+function handleSelectionChange(rows: AuditLogItem[]) {
+  selectedIds.value = rows.map((r) => r.id)
+}
+
+async function handleBatchDelete() {
+  try {
+    await batchDeleteAuditLogs(selectedIds.value)
+    ElMessage.success(`成功删除 ${selectedIds.value.length} 条日志`)
+    selectedIds.value = []
+    await loadLogs()
+  } catch {
+    ElMessage.error('批量删除失败')
+  }
+}
+
 async function handleExport() {
-  const blob: Blob = await exportAuditLogs()
+  const [start, end] = filters.dateRange
+  const blob: Blob = await exportAuditLogs({
+    action: filters.action || undefined,
+    username: filters.username || undefined,
+    startDate: start || undefined,
+    endDate: end || undefined,
+  })
   const url = window.URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -301,6 +353,19 @@ onMounted(loadLogs)
 .filter-form {
   display: flex;
   flex-wrap: wrap;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #f56c6c;
 }
 
 .filter-note {

@@ -7,10 +7,11 @@
         <p class="hero-copy">查看登录、权限和文件操作记录，并导出 CSV。</p>
       </div>
       <div class="hero-actions">
-        <el-button @click="loadLogs" :loading="loading">刷新</el-button>
+        <el-button :icon="Refresh" @click="loadLogs" :loading="loading">刷新</el-button>
         <el-button
           v-if="userStore.hasPermission('audit:export')"
           type="primary"
+          :icon="Download"
           @click="handleExport"
         >
           导出 CSV
@@ -18,11 +19,18 @@
       </div>
     </section>
 
+    <div class="audit-stats">
+      <div v-for="item in auditStats" :key="item.label" class="audit-stat">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </div>
+    </div>
+
     <el-card class="filter-card" shadow="never">
       <el-form :inline="true" class="filter-form">
         <el-form-item label="操作类型">
           <el-select v-model="filters.action" clearable filterable placeholder="全部类型" style="width: 180px">
-            <el-option v-for="item in actionOptions" :key="item.value" :label="item.label" :value="item.value" />
+            <el-option v-for="action in actionOptions" :key="action.value" :label="action.label" :value="action.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="用户名称">
@@ -39,8 +47,8 @@
           />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="applyFilters">筛选</el-button>
-          <el-button @click="resetFilters">重置</el-button>
+          <el-button type="primary" :icon="Search" @click="applyFilters">筛选</el-button>
+          <el-button :icon="RefreshLeft" @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -64,7 +72,9 @@
         <el-table-column prop="username" label="用户" min-width="140" />
         <el-table-column label="操作" min-width="160">
           <template #default="{ row }">
-            {{ actionMap[row.action] || row.action }}
+            <el-tag :type="auditActionMeta(row.action).type" effect="plain" :title="row.action">
+              {{ auditActionMeta(row.action).label }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -114,7 +124,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { batchDeleteAuditLogs, deleteAuditLog, exportAuditLogs, getAuditLogs, type AuditLogItem } from '@/api/audit'
+import { Download, Refresh, RefreshLeft, Search } from '@element-plus/icons-vue'
+import { exportAuditLogs, getAuditLogs, type AuditLogItem } from '@/api/audit'
 import { useUserStore } from '@/store/user'
 import { formatDateTime } from '@/utils/format'
 
@@ -135,28 +146,52 @@ const pagination = reactive({
   total: 0,
 })
 
-const actionOptions = [
-  { label: '登录', value: 'LOGIN' },
-  { label: '登录失败', value: 'LOGIN_FAILED' },
-  { label: '登出', value: 'LOGOUT' },
-  { label: '注册', value: 'REGISTER' },
-  { label: '创建目录', value: 'CREATE_DIRECTORY' },
-  { label: '上传文件', value: 'UPLOAD_FILE' },
-  { label: '重命名文件', value: 'RENAME_FILE' },
-  { label: '删除文件', value: 'DELETE_FILE' },
-  { label: '共享文件', value: 'SHARE_FILE' },
-  { label: '审阅文件', value: 'REVIEW_FILE' },
-  { label: '批准文件', value: 'APPROVE_FILE' },
-  { label: '评论文件', value: 'COMMENT_FILE' },
-  { label: '创建角色', value: 'CREATE_ROLE' },
-  { label: '更新角色', value: 'UPDATE_ROLE' },
-  { label: '删除角色', value: 'DELETE_ROLE' },
-  { label: '分配权限', value: 'ASSIGN_PERMISSIONS' },
-  { label: '分配角色', value: 'ASSIGN_USER_ROLES' },
+type AuditTagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
+
+const actionOptions: Array<{ value: string; label: string; type: AuditTagType }> = [
+  { value: 'LOGIN', label: '登录成功', type: 'success' },
+  { value: 'LOGIN_FAILED', label: '登录失败', type: 'danger' },
+  { value: 'LOGOUT', label: '退出登录', type: 'info' },
+  { value: 'CREATE_DIRECTORY', label: '创建目录', type: 'primary' },
+  { value: 'UPLOAD_FILE', label: '上传文件', type: 'primary' },
+  { value: 'RENAME_FILE', label: '重命名文件', type: 'warning' },
+  { value: 'DELETE_FILE', label: '删除文件', type: 'danger' },
+  { value: 'SHARE_FILE', label: '共享文件', type: 'success' },
+  { value: 'REVIEW_FILE', label: '审阅文件', type: 'warning' },
+  { value: 'APPROVE_FILE', label: '审批文件', type: 'success' },
+  { value: 'COMMENT_FILE', label: '评论文件', type: 'info' },
+  { value: 'DELETE_ROLE', label: '删除角色', type: 'danger' },
+  { value: 'ASSIGN_PERMISSIONS', label: '配置权限', type: 'warning' },
+  { value: 'ASSIGN_USER_ROLES', label: '分配角色', type: 'primary' },
 ]
 
-const actionMap: Record<string, string> = {}
-actionOptions.forEach((item) => { actionMap[item.value] = item.label })
+function auditActionMeta(action: string): { value: string; label: string; type: AuditTagType } {
+  return actionOptions.find((item) => item.value === action) || { value: action, label: action, type: 'info' }
+}
+
+const displayLogs = computed(() => {
+  if (filters.dateRange.length !== 2) {
+    return rawLogs.value
+  }
+  const [start, end] = filters.dateRange
+  const startDate = new Date(`${start}T00:00:00`)
+  const endDate = new Date(`${end}T23:59:59`)
+  return rawLogs.value.filter((item) => {
+    if (!item.createdAt) return false
+    const current = new Date(item.createdAt)
+    return current >= startDate && current <= endDate
+  })
+})
+
+const auditStats = computed(() => {
+  const logs = displayLogs.value
+  return [
+    { label: '当前日志', value: logs.length },
+    { label: '成功操作', value: logs.filter((item) => item.success).length },
+    { label: '失败操作', value: logs.filter((item) => !item.success).length },
+    { label: '涉及用户', value: new Set(logs.map((item) => item.username || item.userId)).size },
+  ]
+})
 
 async function loadLogs() {
   loading.value = true
@@ -252,12 +287,11 @@ onMounted(loadLogs)
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 32px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(251, 209, 124, 0.16), transparent 28%),
-    linear-gradient(135deg, #3b2d26 0%, #5a4638 52%, #73624a 100%);
-  color: #fbf8f2;
+  padding: 22px 24px;
+  border: 1px solid #dce6ee;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #fff6ed 48%, #eef6ff 100%);
+  color: #1f3448;
 }
 
 .eyebrow {
@@ -265,7 +299,7 @@ onMounted(loadLogs)
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255, 225, 176, 0.86);
+  color: #9a5b18;
 }
 
 .page-hero h1 {
@@ -276,7 +310,7 @@ onMounted(loadLogs)
 .hero-copy {
   margin: 10px 0 0;
   line-height: 1.7;
-  color: rgba(251, 248, 242, 0.78);
+  color: #647789;
 }
 
 .hero-actions {
@@ -287,7 +321,33 @@ onMounted(loadLogs)
 
 .filter-card,
 .table-card {
-  border-radius: 20px;
+  border-radius: 8px;
+}
+
+.audit-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.audit-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dfe8ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.audit-stat span {
+  color: #66788a;
+}
+
+.audit-stat strong {
+  color: #1f3448;
+  font-size: 24px;
 }
 
 .filter-form {
@@ -328,6 +388,10 @@ onMounted(loadLogs)
 @media (max-width: 960px) {
   .page-hero {
     flex-direction: column;
+  }
+
+  .audit-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

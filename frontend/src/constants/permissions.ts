@@ -26,4 +26,4 @@ export const PERMISSIONS: Permission[] = [
     { id: 23, name: 'file:permission:manage', description: '管理文件角色权限', category: 'file' },
 ]
 
-export const PERMISSION_GROUPS = ['document', 'user', 'role', 'audit', 'system'] as const
+export const PERMISSION_GROUPS = ['document', 'user', 'role', 'audit', 'system', 'file'] as const

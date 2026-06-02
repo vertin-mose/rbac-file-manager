@@ -268,7 +268,8 @@ def get_hierarchy(db: Session) -> list[dict]:
 def list_users(db: Session) -> list[dict]:
     users = db.query(User).filter(User.deleted == False).all()
     return [
-        {"id": u.id, "username": u.username, "display_name": u.display_name, "email": u.email}
+        {"id": u.id, "username": u.username, "display_name": u.display_name, "email": u.email,
+         "roles": [{"id": r.id, "name": r.name} for r in u.roles if not r.deleted]}
         for u in users
     ]
 
@@ -312,12 +313,24 @@ def _check_file_permission(db: Session, file_id: int, user_id: int,
     if f.owner_id == user_id:
         return True
 
-    # Walk up the directory tree to check user-level inherited permissions
+    # Resolve role names → IDs for role-level checks
+    role_ids = [r.id for r in db.query(Role.id).filter(
+        Role.name.in_(roles), Role.deleted == False).all()] if roles else []
+
+    # Walk up the directory tree to check user-level and role-level permissions
     current = f
     while current is not None:
+        # Check user-level permission
         if db.query(FilePermission).filter(
             FilePermission.file_id == current.id,
             FilePermission.user_id == user_id,
+            FilePermission.permission_type == permission_type,
+        ).first() is not None:
+            return True
+        # Check role-level permission
+        if role_ids and db.query(FilePermission).filter(
+            FilePermission.file_id == current.id,
+            FilePermission.role_id.in_(role_ids),
             FilePermission.permission_type == permission_type,
         ).first() is not None:
             return True
@@ -346,6 +359,10 @@ def list_files(db: Session, parent_id: int = 0, user_id: int = None,
             parent_accessible = _check_file_permission(
                 db, parent_id, user_id, roles, "read")
 
+        # Resolve role IDs for role-level access checks
+        role_ids = [r.id for r in db.query(Role.id).filter(
+            Role.name.in_(roles), Role.deleted == False).all()]
+
         def is_file_accessible(f: FileRecord) -> bool:
             if f.owner_id == user_id:
                 return True
@@ -353,6 +370,13 @@ def list_files(db: Session, parent_id: int = 0, user_id: int = None,
             if db.query(FilePermission).filter(
                 FilePermission.file_id == f.id,
                 FilePermission.user_id == user_id,
+                FilePermission.permission_type == "read",
+            ).first():
+                return True
+            # Role-level permission
+            if role_ids and db.query(FilePermission).filter(
+                FilePermission.file_id == f.id,
+                FilePermission.role_id.in_(role_ids),
                 FilePermission.permission_type == "read",
             ).first():
                 return True
@@ -510,15 +534,27 @@ def delete_file(db: Session, file_id: int, user_id: int = None,
     db.commit()
 
 
-def share_file(db: Session, file_id: int, user_ids: list[int], role_ids: list[int]):
+def share_file(db: Session, file_id: int, user_ids: list[int],
+               permission_type: str = "read") -> dict:
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
+    granted = []
+    skipped = []
     for uid in user_ids:
-        db.add(FilePermission(file_id=file_id, user_id=uid, permission_type="read"))
-    for rid in role_ids:
-        db.add(FilePermission(file_id=file_id, role_id=rid, permission_type="read"))
-    db.commit()
+        existing = db.query(FilePermission).filter(
+            FilePermission.file_id == file_id,
+            FilePermission.user_id == uid,
+            FilePermission.permission_type == permission_type,
+        ).first()
+        if existing:
+            skipped.append(uid)
+        else:
+            db.add(FilePermission(file_id=file_id, user_id=uid, permission_type=permission_type))
+            granted.append(uid)
+    if granted:
+        db.commit()
+    return {"granted": granted, "skipped": skipped}
 
 
 # ── File Permission Service ────────────────────────────────────────────────
@@ -569,6 +605,48 @@ def delete_file_permission(db: Session, perm_id: int):
         raise HTTPException(status_code=404, detail="Permission not found")
     db.delete(perm)
     db.commit()
+
+
+def can_manage_file_permissions(db: Session, file_id: int, user_id: int, roles: list[str]) -> bool:
+    """Check if user can modify file permissions.
+    - Admin/SUPER_ADMIN always can.
+    - File owner can if no permissions have been set yet (initial setup).
+    """
+    if _is_privileged_role(roles):
+        return True
+    # Check if user has file:permission:manage via any role
+    for role_name in roles:
+        role = db.query(Role).filter(Role.name == role_name, Role.deleted == False).first()
+        if role and "file:permission:manage" in get_effective_permissions(role.id, db):
+            return True
+    # Allow file owner for initial setup (no permissions exist yet)
+    f = db.get(FileRecord, file_id)
+    if f and not f.deleted and f.owner_id == user_id:
+        existing = db.query(FilePermission).filter(FilePermission.file_id == file_id).count()
+        if existing == 0:
+            return True
+    return False
+
+
+def ensure_missing_permissions(db: Session):
+    """Ensure file:permission:manage exists and is assigned to ADMIN role.
+    Safe to call on every startup — skips if already seeded.
+    """
+    perm = db.query(Permission).filter(
+        Permission.name == "file:permission:manage", Permission.deleted == False
+    ).first()
+    if not perm:
+        perm = Permission(name="file:permission:manage",
+                          description="Manage file role permissions",
+                          category="file")
+        db.add(perm)
+        db.commit()
+        db.refresh(perm)
+
+    admin_role = db.query(Role).filter(Role.name == "ADMIN", Role.deleted == False).first()
+    if admin_role and perm not in admin_role.permissions:
+        admin_role.permissions.append(perm)
+        db.commit()
 
 
 # ── Audit Service ──────────────────────────────────────────────────────────

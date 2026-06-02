@@ -257,6 +257,7 @@ function categoryLabel(category: string) {
     role: '角色权限',
     audit: '审计权限',
     system: '系统权限',
+    file: '文件权限',
   }
   return labels[category] || category
 }

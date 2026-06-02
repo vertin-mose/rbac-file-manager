@@ -144,30 +144,35 @@
                       重命名
                     </el-button>
                     <el-button
+                      v-if="userStore.hasPermission('doc:share')"
                       link
-                      @click.stop="openPermissionDialog(row)"
+                      @click.stop="openShareDialog(row)"
                     >
                       共享
                     </el-button>
                     <el-button
+                      v-if="userStore.hasPermission('doc:review')"
                       link
                       @click.stop="openActionDialog('review', row)"
                     >
                       审阅
                     </el-button>
                     <el-button
+                      v-if="userStore.hasPermission('doc:approve')"
                       link
                       @click.stop="openActionDialog('approve', row)"
                     >
                       审批
                     </el-button>
                     <el-button
+                      v-if="userStore.hasPermission('doc:comment')"
                       link
                       @click.stop="openActionDialog('comment', row)"
                     >
                       评论
                     </el-button>
                     <el-button
+                      v-if="userStore.hasPermission('doc:delete')"
                       link
                       type="danger"
                       @click.stop="confirmDelete(row)"
@@ -246,6 +251,14 @@
       @updated="refreshAll"
     />
 
+    <ShareDialog
+      :visible="dialogs.share.visible"
+      :file-id="dialogs.share.fileId"
+      :file-name="dialogs.share.fileName"
+      @close="dialogs.share.visible = false"
+      @updated="refreshAll"
+    />
+
     <el-dialog v-model="dialogs.action.visible" :title="actionDialogTitle" width="500px">
       <el-form label-position="top">
         <el-form-item label="说明">
@@ -271,6 +284,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Folder } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
 import FilePermissionDialog from '@/components/FilePermissionDialog.vue'
+import ShareDialog from '@/components/ShareDialog.vue'
 import {
   approveFile,
   commentFile,
@@ -312,6 +326,11 @@ const dialogs = reactive({
     content: '',
   },
   permission: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
+  },
+  share: {
     visible: false,
     fileId: 0,
     fileName: '',
@@ -398,6 +417,12 @@ function openPermissionDialog(file: FileItem) {
   dialogs.permission.fileId = file.id
   dialogs.permission.fileName = file.fileName
   dialogs.permission.visible = true
+}
+
+function openShareDialog(file: FileItem) {
+  dialogs.share.fileId = file.id
+  dialogs.share.fileName = file.fileName
+  dialogs.share.visible = true
 }
 
 async function submitAction() {
@@ -494,17 +519,28 @@ async function handleFileInputChange(e: Event) {
   const file = input.files?.[0]
   if (!file) return
 
+  let newFile: any
   try {
-    await uploadFile(file, fileStore.currentParentId)
+    const res: any = await uploadFile(file, fileStore.currentParentId)
+    newFile = res.data || res
     ElMessage.success('文件上传成功')
   } catch {
     ElMessage.error('上传失败')
+    input.value = ''
+    await refreshAll()
+    return
   }
 
   // Reset input so the same file can be re-uploaded
   input.value = ''
-
   await refreshAll()
+
+  // Open permission dialog for the newly uploaded file
+  if (newFile && newFile.id) {
+    dialogs.permission.fileId = newFile.id
+    dialogs.permission.fileName = newFile.fileName || newFile.file_name
+    dialogs.permission.visible = true
+  }
 }
 
 onMounted(async () => {

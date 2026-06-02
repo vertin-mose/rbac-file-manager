@@ -88,3 +88,43 @@ export async function downloadFile(id: number): Promise<Blob> {
 export function getDownloadUrl(id: number): string {
     return `/api/files/${id}/download`
 }
+
+export interface FilePermissionItem {
+    id: number
+    fileId: number
+    roleId: number | null
+    roleName: string | null
+    userId: number | null
+    username: string | null
+    permissionType: string
+    grantedAt: string | null
+}
+
+function mapFilePermissionItem(item: any): FilePermissionItem {
+    return {
+        id: item.id,
+        fileId: item.file_id,
+        roleId: item.role_id ?? null,
+        roleName: item.role_name ?? null,
+        userId: item.user_id ?? null,
+        username: item.username ?? null,
+        permissionType: item.permission_type,
+        grantedAt: item.granted_at ?? null,
+    }
+}
+
+export async function getFilePermissions(fileId: number): Promise<FilePermissionItem[]> {
+    const res: any = await request.get(`/files/${fileId}/permissions`)
+    return (res.data || []).map(mapFilePermissionItem)
+}
+
+export async function setFilePermissions(
+    fileId: number,
+    permissions: { user_id: number; permission_type: string }[],
+): Promise<void> {
+    await request.put(`/files/${fileId}/permissions`, { permissions })
+}
+
+export async function deleteFilePermission(fileId: number, permId: number): Promise<void> {
+    await request.delete(`/files/${fileId}/permissions/${permId}`)
+}

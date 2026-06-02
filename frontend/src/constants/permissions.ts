@@ -1,9 +1,9 @@
 import type { Permission } from '@/api/role'
 
-export type PermissionCategory = 'document' | 'user' | 'role' | 'audit' | 'system'
+export type PermissionCategory = 'document' | 'user' | 'role' | 'audit' | 'system' | 'file'
 export type PermissionTagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
 
-export const PERMISSION_GROUPS = ['document', 'user', 'role', 'audit', 'system'] as const
+export const PERMISSION_GROUPS = ['document', 'user', 'role', 'audit', 'system', 'file'] as const
 
 export const PERMISSION_CATEGORY_META: Record<
     PermissionCategory,
@@ -14,6 +14,7 @@ export const PERMISSION_CATEGORY_META: Record<
     role: { label: '角色权限', shortLabel: '角色', tagType: 'warning' },
     audit: { label: '审计权限', shortLabel: '审计', tagType: 'info' },
     system: { label: '系统权限', shortLabel: '系统', tagType: 'danger' },
+    file: { label: '文件权限', shortLabel: '文件', tagType: 'warning' },
 }
 
 export const PERMISSIONS: Permission[] = [
@@ -39,6 +40,7 @@ export const PERMISSIONS: Permission[] = [
     { id: 20, name: 'audit:export', description: '导出审计日志数据', category: 'audit' },
     { id: 21, name: 'system:config', description: '修改系统配置与运行参数', category: 'system' },
     { id: 22, name: 'system:backup', description: '执行系统备份与恢复', category: 'system' },
+    { id: 23, name: 'file:permission:manage', description: '管理文件用户权限', category: 'file' },
 ]
 
 const RESOURCE_LABELS: Record<string, string> = {
@@ -70,6 +72,7 @@ const CATEGORY_BY_RESOURCE: Record<string, PermissionCategory> = {
     role: 'role',
     audit: 'audit',
     system: 'system',
+    file: 'file',
 }
 
 const permissionsByName = new Map(PERMISSIONS.map((permission) => [permission.name, permission]))

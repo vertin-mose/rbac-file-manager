@@ -186,6 +186,14 @@
                     >
                       删除
                     </el-button>
+                    <el-button
+                      v-if="userStore.hasPermission('file:permission:manage')"
+                      link
+                      type="warning"
+                      @click.stop="openPermissionDialog(row)"
+                    >
+                      权限
+                    </el-button>
                   </div>
                 </template>
               </el-table-column>
@@ -270,6 +278,14 @@
         <el-button type="primary" @click="submitAction">提交</el-button>
       </template>
     </el-dialog>
+
+    <FilePermissionDialog
+      :visible="dialogs.permission.visible"
+      :file-id="dialogs.permission.fileId"
+      :file-name="dialogs.permission.fileName"
+      @close="dialogs.permission.visible = false"
+      @updated="refreshAll"
+    />
   </div>
 </template>
 
@@ -278,6 +294,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Folder, Plus, Refresh, Upload } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
+import FilePermissionDialog from '@/components/FilePermissionDialog.vue'
 import {
   approveFile,
   commentFile,
@@ -334,6 +351,11 @@ const dialogs = reactive({
     content: '',
     userIdsText: '',
     roleIdsText: '',
+  },
+  permission: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
   },
 })
 
@@ -415,6 +437,12 @@ function openActionDialog(mode: ActionMode, file: FileItem) {
   dialogs.action.content = ''
   dialogs.action.userIdsText = ''
   dialogs.action.roleIdsText = ''
+}
+
+function openPermissionDialog(file: FileItem) {
+  dialogs.permission.fileId = file.id
+  dialogs.permission.fileName = file.fileName
+  dialogs.permission.visible = true
 }
 
 function parseNumberList(text: string): number[] {

@@ -265,6 +265,14 @@ def get_hierarchy(db: Session) -> list[dict]:
     return result
 
 
+def list_users(db: Session) -> list[dict]:
+    users = db.query(User).filter(User.deleted == False).all()
+    return [
+        {"id": u.id, "username": u.username, "display_name": u.display_name, "email": u.email}
+        for u in users
+    ]
+
+
 def get_user_info(db: Session, user_id: int) -> dict:
     user = db.get(User, user_id)
     if not user or user.deleted:
@@ -290,13 +298,71 @@ def assign_user_roles(db: Session, user_id: int, role_ids: list[int]):
 
 # ── File Service ───────────────────────────────────────────────────────────
 
-def list_files(db: Session, parent_id: int = 0, user_id: int = None):
+def _is_privileged_role(roles: list[str]) -> bool:
+    return bool(roles and set(roles) & {"SUPER_ADMIN", "ADMIN"})
+
+
+def _check_file_permission(db: Session, file_id: int, user_id: int,
+                           roles: list[str], permission_type: str) -> bool:
+    if _is_privileged_role(roles):
+        return True
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        return False
+    if f.owner_id == user_id:
+        return True
+
+    # Walk up the directory tree to check user-level inherited permissions
+    current = f
+    while current is not None:
+        if db.query(FilePermission).filter(
+            FilePermission.file_id == current.id,
+            FilePermission.user_id == user_id,
+            FilePermission.permission_type == permission_type,
+        ).first() is not None:
+            return True
+        if current.parent_id:
+            current = db.get(FileRecord, current.parent_id)
+            if not current or current.deleted:
+                break
+        else:
+            break
+    return False
+
+
+def list_files(db: Session, parent_id: int = 0, user_id: int = None,
+               roles: list[str] = None):
     if parent_id == 0:
         files = db.query(FileRecord).filter(
             FileRecord.parent_id.is_(None), FileRecord.deleted == False).all()
     else:
         files = db.query(FileRecord).filter(
             FileRecord.parent_id == parent_id, FileRecord.deleted == False).all()
+
+    if user_id and roles and not _is_privileged_role(roles):
+        # Check if the parent directory itself is accessible (directory inheritance)
+        parent_accessible = False
+        if parent_id:
+            parent_accessible = _check_file_permission(
+                db, parent_id, user_id, roles, "read")
+
+        def is_file_accessible(f: FileRecord) -> bool:
+            if f.owner_id == user_id:
+                return True
+            # Direct user-level permission
+            if db.query(FilePermission).filter(
+                FilePermission.file_id == f.id,
+                FilePermission.user_id == user_id,
+                FilePermission.permission_type == "read",
+            ).first():
+                return True
+            # Inherited from parent directory
+            if parent_accessible:
+                return True
+            return False
+
+        files = [f for f in files if is_file_accessible(f)]
+
     return [_file_to_dict(f) for f in files]
 
 
@@ -310,10 +376,13 @@ def _file_to_dict(f: FileRecord) -> dict:
     }
 
 
-def get_file(db: Session, file_id: int) -> dict:
+def get_file(db: Session, file_id: int, user_id: int = None,
+             roles: list[str] = None) -> dict:
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
+    if user_id and roles and not _check_file_permission(db, file_id, user_id, roles, "read"):
+        raise HTTPException(status_code=403, detail="No permission to access this file")
     return _file_to_dict(f)
 
 
@@ -361,18 +430,24 @@ def create_directory(db: Session, name: str, parent_id: int, owner_id: int) -> d
     return _file_to_dict(f)
 
 
-def rename_file(db: Session, file_id: int, new_name: str) -> dict:
+def rename_file(db: Session, file_id: int, new_name: str,
+                user_id: int = None, roles: list[str] = None) -> dict:
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
+    if user_id and roles and not _check_file_permission(db, file_id, user_id, roles, "write"):
+        raise HTTPException(status_code=403, detail="No permission to rename this file")
     f.file_name = new_name
     db.commit()
     db.refresh(f)
     return _file_to_dict(f)
 
 
-def get_file_content(db: Session, file_id: int) -> tuple[bytes, str, str]:
+def get_file_content(db: Session, file_id: int, user_id: int = None,
+                     roles: list[str] = None) -> tuple[bytes, str, str]:
     """Return (content_bytes, mime_type, file_name) for a file record."""
+    if user_id and roles and not _check_file_permission(db, file_id, user_id, roles, "read"):
+        raise HTTPException(status_code=403, detail="No permission to access this file")
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
@@ -414,10 +489,13 @@ def get_file_content(db: Session, file_id: int) -> tuple[bytes, str, str]:
         raise HTTPException(status_code=501, detail="文件内容不可用：读取存储服务时出错")
 
 
-def delete_file(db: Session, file_id: int):
+def delete_file(db: Session, file_id: int, user_id: int = None,
+                roles: list[str] = None):
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
+    if user_id and roles and not _check_file_permission(db, file_id, user_id, roles, "delete"):
+        raise HTTPException(status_code=403, detail="No permission to delete this file")
     deleted_ids: list[int] = []
 
     def mark_deleted(node: FileRecord):
@@ -439,6 +517,56 @@ def share_file(db: Session, file_id: int, user_ids: list[int], role_ids: list[in
         db.add(FilePermission(file_id=file_id, user_id=uid, permission_type="read"))
     for rid in role_ids:
         db.add(FilePermission(file_id=file_id, role_id=rid, permission_type="read"))
+    db.commit()
+
+
+# ── File Permission Service ────────────────────────────────────────────────
+
+def get_file_permissions(db: Session, file_id: int) -> list[dict]:
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    perms = db.query(FilePermission).filter(FilePermission.file_id == file_id).all()
+    result = []
+    for p in perms:
+        role = db.get(Role, p.role_id) if p.role_id else None
+        user = db.get(User, p.user_id) if p.user_id else None
+        result.append({
+            "id": p.id,
+            "file_id": p.file_id,
+            "role_id": p.role_id,
+            "role_name": role.name if role and not role.deleted else None,
+            "user_id": p.user_id,
+            "username": user.username if user and not user.deleted else None,
+            "permission_type": p.permission_type,
+            "granted_at": p.granted_at.isoformat() if p.granted_at else None,
+        })
+    return result
+
+
+def set_file_permissions(db: Session, file_id: int,
+                         permissions: list[dict]) -> list[dict]:
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    db.query(FilePermission).filter(FilePermission.file_id == file_id).delete(
+        synchronize_session=False)
+    for perm in permissions:
+        db.add(FilePermission(
+            file_id=file_id,
+            role_id=perm.get("role_id"),
+            user_id=perm.get("user_id"),
+            permission_type=perm["permission_type"],
+        ))
+    db.commit()
+    return get_file_permissions(db, file_id)
+
+
+def delete_file_permission(db: Session, perm_id: int):
+    perm = db.get(FilePermission, perm_id)
+    if not perm:
+        raise HTTPException(status_code=404, detail="Permission not found")
+    db.delete(perm)
     db.commit()
 
 

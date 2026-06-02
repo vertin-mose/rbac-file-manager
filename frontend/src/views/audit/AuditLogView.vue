@@ -122,10 +122,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Refresh, RefreshLeft, Search } from '@element-plus/icons-vue'
-import { exportAuditLogs, getAuditLogs, type AuditLogItem } from '@/api/audit'
+import { batchDeleteAuditLogs, deleteAuditLog, exportAuditLogs, getAuditLogs, type AuditLogItem } from '@/api/audit'
 import { useUserStore } from '@/store/user'
 import { formatDateTime } from '@/utils/format'
 

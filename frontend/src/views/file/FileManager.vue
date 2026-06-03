@@ -13,17 +13,13 @@
         </div>
         <div class="hero-actions">
           <el-button
-            v-if="userStore.hasPermission('doc:create')"
             type="primary"
-            :icon="Plus"
             @click="openCreateDialog()"
           >
             新建目录
           </el-button>
           <el-button
-            v-if="userStore.hasPermission('doc:create')"
             type="success"
-            :icon="Upload"
             @click="triggerFileUpload"
           >
             上传文件
@@ -34,7 +30,7 @@
             style="display: none"
             @change="handleFileInputChange"
           />
-          <el-button :icon="Refresh" :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
+          <el-button :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
         </div>
       </section>
 
@@ -75,9 +71,14 @@
                   <h2>目录内容</h2>
                   <p>双击目录进入，单击选中项目后执行操作。</p>
                 </div>
-                <div class="ability-summary" :title="availableFileActions.join('、')">
-                  <strong>{{ availableFileActions.length }}</strong>
-                  <span>项可用操作</span>
+                <div class="ability-summary">
+                  <el-tag
+                    v-if="userStore.hasPermission('file:permission:manage')"
+                    type="warning"
+                    effect="plain"
+                    size="small"
+                  >管理员权限模式</el-tag>
+                  <el-tag v-else effect="plain" size="small">文件权限控制模式</el-tag>
                 </div>
               </div>
             </template>
@@ -104,9 +105,9 @@
                 </template>
               </el-table-column>
 
-              <el-table-column label="类型" min-width="140">
+              <el-table-column label="类型" min-width="120">
                 <template #default="{ row }">
-                  <el-tag :type="row.isDirectory ? 'warning' : 'info'" effect="plain">
+                  <el-tag :type="row.isDirectory ? 'warning' : 'info'" effect="plain" size="small">
                     {{ row.isDirectory ? '目录' : fileTypeLabel(row.mimeType) }}
                   </el-tag>
                 </template>
@@ -144,7 +145,6 @@
                       查看
                     </el-button>
                     <el-button
-                      v-if="userStore.hasPermission('doc:update')"
                       link
                       @click.stop="openRenameDialog({ id: row.id, label: row.fileName })"
                     >
@@ -153,7 +153,7 @@
                     <el-button
                       v-if="userStore.hasPermission('doc:share')"
                       link
-                      @click.stop="openActionDialog('share', row)"
+                      @click.stop="openShareDialog(row)"
                     >
                       共享
                     </el-button>
@@ -250,35 +250,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dialogs.action.visible" :title="actionDialogTitle" width="500px">
-      <template v-if="dialogs.action.mode === 'share'">
-        <el-form label-position="top">
-          <el-form-item label="用户 ID 列表">
-            <el-input v-model="dialogs.action.userIdsText" placeholder="例如：1,2,3" />
-          </el-form-item>
-          <el-form-item label="角色 ID 列表">
-            <el-input v-model="dialogs.action.roleIdsText" placeholder="例如：4,5" />
-          </el-form-item>
-        </el-form>
-      </template>
-      <template v-else>
-        <el-form label-position="top">
-          <el-form-item label="说明">
-            <el-input
-              v-model="dialogs.action.content"
-              type="textarea"
-              :rows="4"
-              :placeholder="dialogs.action.mode === 'comment' ? '请输入评论内容' : '请输入处理说明'"
-            />
-          </el-form-item>
-        </el-form>
-      </template>
-      <template #footer>
-        <el-button @click="dialogs.action.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitAction">提交</el-button>
-      </template>
-    </el-dialog>
-
     <FilePermissionDialog
       :visible="dialogs.permission.visible"
       :file-id="dialogs.permission.fileId"
@@ -286,15 +257,41 @@
       @close="dialogs.permission.visible = false"
       @updated="refreshAll"
     />
+
+    <ShareDialog
+      :visible="dialogs.share.visible"
+      :file-id="dialogs.share.fileId"
+      :file-name="dialogs.share.fileName"
+      @close="dialogs.share.visible = false"
+      @updated="refreshAll"
+    />
+
+    <el-dialog v-model="dialogs.action.visible" :title="actionDialogTitle" width="500px">
+      <el-form label-position="top">
+        <el-form-item label="说明">
+          <el-input
+            v-model="dialogs.action.content"
+            type="textarea"
+            :rows="4"
+            :placeholder="dialogs.action.mode === 'comment' ? '请输入评论内容' : '请输入处理说明'"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogs.action.visible = false">取消</el-button>
+        <el-button type="primary" @click="submitAction">提交</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Folder, Plus, Refresh, Upload } from '@element-plus/icons-vue'
+import { Document, Folder } from '@element-plus/icons-vue'
 import FileTree from '@/components/FileTree.vue'
 import FilePermissionDialog from '@/components/FilePermissionDialog.vue'
+import ShareDialog from '@/components/ShareDialog.vue'
 import {
   approveFile,
   commentFile,
@@ -311,26 +308,12 @@ import { useFileStore } from '@/store/file'
 import { useUserStore } from '@/store/user'
 import { formatBytes, formatDateTime } from '@/utils/format'
 
-type ActionMode = 'share' | 'review' | 'approve' | 'comment'
+type ActionMode = 'review' | 'approve' | 'comment'
 
 const fileStore = useFileStore()
 const userStore = useUserStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
-
-const FILE_ACTIONS = [
-  { permission: 'doc:create', label: '创建' },
-  { permission: 'doc:update', label: '编辑' },
-  { permission: 'doc:delete', label: '删除' },
-  { permission: 'doc:review', label: '审阅' },
-  { permission: 'doc:approve', label: '审批' },
-  { permission: 'doc:share', label: '共享' },
-  { permission: 'doc:comment', label: '评论' },
-] as const
-
-const availableFileActions = computed(() =>
-  FILE_ACTIONS.filter((action) => userStore.hasPermission(action.permission)).map((action) => action.label),
-)
 
 const dialogs = reactive({
   create: {
@@ -346,13 +329,16 @@ const dialogs = reactive({
   },
   action: {
     visible: false,
-    mode: 'share' as ActionMode,
+    mode: 'review' as ActionMode,
     file: null as FileItem | null,
     content: '',
-    userIdsText: '',
-    roleIdsText: '',
   },
   permission: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
+  },
+  share: {
     visible: false,
     fileId: 0,
     fileName: '',
@@ -361,8 +347,6 @@ const dialogs = reactive({
 
 const actionDialogTitle = computed(() => {
   switch (dialogs.action.mode) {
-    case 'share':
-      return '共享文件'
     case 'review':
       return '提交审阅'
     case 'approve':
@@ -435,8 +419,6 @@ function openActionDialog(mode: ActionMode, file: FileItem) {
   dialogs.action.mode = mode
   dialogs.action.file = file
   dialogs.action.content = ''
-  dialogs.action.userIdsText = ''
-  dialogs.action.roleIdsText = ''
 }
 
 function openPermissionDialog(file: FileItem) {
@@ -445,14 +427,13 @@ function openPermissionDialog(file: FileItem) {
   dialogs.permission.visible = true
 }
 
-function parseNumberList(text: string): number[] {
-  return text
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isInteger(item) && item > 0)
+function openShareDialog(file: FileItem) {
+  dialogs.share.fileId = file.id
+  dialogs.share.fileName = file.fileName
+  dialogs.share.visible = true
 }
 
-function fileTypeLabel(mimeType: string) {
+function fileTypeLabel(mimeType: string): string {
   if (!mimeType) return '文件'
   if (mimeType.includes('pdf')) return 'PDF'
   if (mimeType.includes('word') || mimeType.includes('document')) return 'Word'
@@ -460,18 +441,14 @@ function fileTypeLabel(mimeType: string) {
   if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '演示文稿'
   if (mimeType.startsWith('image/')) return '图片'
   if (mimeType.startsWith('text/')) return '文本'
+  if (mimeType.includes('zip') || mimeType.includes('compressed')) return '压缩包'
   return mimeType.split('/').pop()?.toUpperCase() || '文件'
 }
 
 async function submitAction() {
   if (!dialogs.action.file) return
 
-  if (dialogs.action.mode === 'share') {
-    await shareFile(dialogs.action.file.id, {
-      userIds: parseNumberList(dialogs.action.userIdsText),
-      roleIds: parseNumberList(dialogs.action.roleIdsText),
-    })
-  } else if (dialogs.action.mode === 'review') {
+  if (dialogs.action.mode === 'review') {
     await reviewFile(dialogs.action.file.id, dialogs.action.content)
   } else if (dialogs.action.mode === 'approve') {
     await approveFile(dialogs.action.file.id, dialogs.action.content)
@@ -562,17 +539,28 @@ async function handleFileInputChange(e: Event) {
   const file = input.files?.[0]
   if (!file) return
 
+  let newFile: any
   try {
-    await uploadFile(file, fileStore.currentParentId)
+    const res: any = await uploadFile(file, fileStore.currentParentId)
+    newFile = res.data || res
     ElMessage.success('文件上传成功')
   } catch {
     ElMessage.error('上传失败')
+    input.value = ''
+    await refreshAll()
+    return
   }
 
   // Reset input so the same file can be re-uploaded
   input.value = ''
-
   await refreshAll()
+
+  // Open permission dialog for the newly uploaded file
+  if (newFile && newFile.id) {
+    dialogs.permission.fileId = newFile.id
+    dialogs.permission.fileName = newFile.fileName || newFile.file_name
+    dialogs.permission.visible = true
+  }
 }
 
 onMounted(async () => {
@@ -597,11 +585,12 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 22px 24px;
-  border: 1px solid #dce6ee;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #ffffff 0%, #eef8f4 52%, #eef4ff 100%);
-  color: #1f3448;
+  padding: 28px 32px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(197, 145, 56, 0.16), transparent 28%),
+    linear-gradient(135deg, #12324b 0%, #204e68 52%, #2f6e86 100%);
+  color: #f5f7fa;
 }
 
 .eyebrow {
@@ -609,7 +598,7 @@ onMounted(async () => {
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #18746b;
+  color: rgba(255, 222, 173, 0.84);
 }
 
 .page-hero h1 {
@@ -621,7 +610,7 @@ onMounted(async () => {
   margin: 10px 0 0;
   max-width: 560px;
   line-height: 1.7;
-  color: #647789;
+  color: rgba(245, 247, 250, 0.8);
 }
 
 .hero-actions {
@@ -640,7 +629,7 @@ onMounted(async () => {
 .sidebar-card,
 .breadcrumb-card,
 .table-card {
-  border-radius: 8px;
+  border-radius: 20px;
 }
 
 .main-column {
@@ -667,27 +656,11 @@ onMounted(async () => {
   color: #7c8b99;
 }
 
+.action-tags,
 .table-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.ability-summary {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid #dbe8f0;
-  border-radius: 8px;
-  background: #f7fafc;
-  color: #66788a;
-  white-space: nowrap;
-}
-
-.ability-summary strong {
-  color: #1f3448;
-  font-size: 20px;
 }
 
 .name-cell {

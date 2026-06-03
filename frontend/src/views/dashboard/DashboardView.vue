@@ -94,11 +94,44 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useUserStore } from '@/store/user'
 import { PERMISSIONS, PERMISSION_CATEGORY_META, PERMISSION_GROUPS, resolvePermission } from '@/constants/permissions'
+import { getRoles } from '@/api/role'
+import { getFiles } from '@/api/file'
+import { getAuditLogs } from '@/api/audit'
 
 const userStore = useUserStore()
+
+// Real-time stats from backend
+const totalRoles = ref(0)
+const totalFiles = ref(0)
+const totalAuditLogs = ref(0)
+const statsLoading = ref(false)
+
+async function loadStats() {
+  statsLoading.value = true
+  try {
+    if (userStore.hasPermission('role:read')) {
+      const roles = await getRoles()
+      totalRoles.value = roles.length
+    }
+    if (userStore.hasPermission('doc:read')) {
+      const files = await getFiles(0)
+      totalFiles.value = files.length
+    }
+    if (userStore.hasPermission('audit:read')) {
+      const logs = await getAuditLogs({ page: 1, size: 1 })
+      totalAuditLogs.value = logs.total
+    }
+  } catch {
+    // Silently ignore — stats are supplementary
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+onMounted(loadStats)
 
 const effectivePermissions = computed(() =>
   Array.from(new Set(userStore.permissions)).map((permission) => resolvePermission(permission)),
@@ -152,9 +185,9 @@ const cards = computed(() => [
     hint: '来自角色及继承权限',
   },
   {
-    title: '拥有角色数',
-    value: userStore.roles.length,
-    hint: '可同时包含多个角色',
+    title: '系统角色数',
+    value: totalRoles.value || userStore.roles.length,
+    hint: userStore.hasPermission('role:read') ? '实时数据' : '可见角色',
   },
   {
     title: '访问层级',
@@ -162,9 +195,13 @@ const cards = computed(() => [
     hint: '数字越小权限越高',
   },
   {
-    title: '文档操作能力',
-    value: userStore.hasPermission('doc:create') ? '可编辑' : '只读',
-    hint: userStore.hasPermission('doc:approve') ? '含审批能力' : '无审批能力',
+    title: userStore.hasPermission('audit:read') ? '审计日志总数' : '文档操作能力',
+    value: userStore.hasPermission('audit:read')
+      ? totalAuditLogs.value
+      : (userStore.hasPermission('doc:create') ? '可编辑' : '只读'),
+    hint: userStore.hasPermission('audit:read')
+      ? '系统全部操作记录'
+      : (userStore.hasPermission('doc:approve') ? '含审批能力' : '无审批能力'),
   },
 ])
 </script>

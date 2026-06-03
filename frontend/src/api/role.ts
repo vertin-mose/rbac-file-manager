@@ -100,6 +100,7 @@ export interface UserBasic {
     username: string
     display_name: string | null
     email: string | null
+    roles?: { id: number; name: string }[]
 }
 
 export async function listUsers(): Promise<UserBasic[]> {

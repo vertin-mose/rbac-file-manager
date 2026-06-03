@@ -24,6 +24,11 @@
           <span>文件管理</span>
         </el-menu-item>
 
+        <el-menu-item v-if="userStore.highestLevel <= 2" index="/users">
+          <el-icon><User /></el-icon>
+          <span>用户管理</span>
+        </el-menu-item>
+
         <el-menu-item v-if="userStore.highestLevel <= 2" index="/roles">
           <el-icon><Setting /></el-icon>
           <span>角色管理</span>
@@ -97,6 +102,7 @@ const currentTitle = computed(() => {
   const map: Record<string, string> = {
     '/dashboard': '总体数据',
     '/files': '文件管理',
+    '/users': '用户管理',
     '/roles': '角色管理',
     '/audit': '审计日志',
     '/system-config': '系统配置',

@@ -77,11 +77,16 @@ CREATE TABLE IF NOT EXISTS file_records (
     mime_type VARCHAR(100),
     owner_id BIGINT NOT NULL,
     storage_url VARCHAR(1000),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' COMMENT 'draft, under_review, approved, rejected',
+    review_comment VARCHAR(500),
+    reviewed_by BIGINT,
+    reviewed_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted BOOLEAN NOT NULL DEFAULT FALSE,
     FOREIGN KEY (parent_id) REFERENCES file_records(id) ON DELETE SET NULL,
-    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- File-level permissions (optional fine-grained control)

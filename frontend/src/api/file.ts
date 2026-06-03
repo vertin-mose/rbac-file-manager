@@ -59,10 +59,10 @@ export function renameFile(id: number, newName: string) {
     return request.put(`/files/${id}`, { file_name: newName })
 }
 
-export function shareFile(id: number, payload: { userIds?: number[]; roleIds?: number[] }) {
+export function shareFile(id: number, payload: { userIds?: number[]; permissionType?: string }) {
     return request.post(`/files/${id}/share`, {
         user_ids: payload.userIds || [],
-        role_ids: payload.roleIds || [],
+        permission_type: payload.permissionType || 'read',
     })
 }
 
@@ -120,7 +120,7 @@ export async function getFilePermissions(fileId: number): Promise<FilePermission
 
 export async function setFilePermissions(
     fileId: number,
-    permissions: { user_id: number; permission_type: string }[],
+    permissions: { role_id?: number; user_id?: number; permission_type: string }[],
 ): Promise<void> {
     await request.put(`/files/${fileId}/permissions`, { permissions })
 }

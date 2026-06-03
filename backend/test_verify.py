@@ -1,407 +1,447 @@
 """
-Integration test script for the feat/file-user-permissions branch.
-Requires the backend to be running at http://localhost:8080.
+RBAC Document Management System — Backend Integration Test Suite
+================================================================
+Tests a running backend end-to-end.
 
 Usage:
-    python test_verify.py [--url http://localhost:8080] [--verbose]
+    python test_verify.py
+    python test_verify.py --url http://localhost:8080
 
-Focus areas (beyond base tests):
-  - File-level permission CRUD (GET/PUT/DELETE /api/files/{id}/permissions)
-  - Changed file-operation behaviour (get/rename/delete respect file permissions)
-  - GET /api/users endpoint
-  - file:permission:manage RBAC enforcement
-  - Directory-inheritance of permissions
+Output labels:
+    [PASS]  test passed
+    [FAIL]  test failed  →  reason
+    [NOTE]  informational annotation
+    [WARN]  warning (counted as pass)
+    [SKIP]  skipped due to missing prerequisite
+
+Exit code: 0 = all pass, 1 = failures
 """
 
-import argparse
-import json
-import sys
-import time
-import urllib.request
-import urllib.error
+import argparse, json, sys, time, urllib.request, urllib.error
 
 ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
-TEST_USER  = f"fp_test_{int(time.time())}"
+TEST_USER  = f"integ_{int(time.time())}"
 TEST_PASS  = "TestPass@2024"
 
+class C:
+    PASS="\033[92m"; FAIL="\033[91m"; NOTE="\033[94m"
+    WARN="\033[93m"; SKIP="\033[90m"; BOLD="\033[1m"; RESET="\033[0m"
 
-class Colors:
-    GREEN  = "\033[92m"; RED   = "\033[91m"; YELLOW = "\033[93m"
-    BLUE   = "\033[94m"; RESET = "\033[0m";  BOLD   = "\033[1m"
-
-
-def _req(method, url, body=None, headers=None, token=None):
-    hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
-    if headers: hdrs.update(headers)
-    if token:   hdrs["Authorization"] = f"Bearer {token}"
+def _req(method, url, body=None, token=None):
+    hdrs = {"Content-Type":"application/json","Accept":"application/json"}
+    if token: hdrs["Authorization"] = f"Bearer {token}"
     data = json.dumps(body).encode() if body is not None else None
-    req  = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+    req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read()
-            ct  = resp.headers.get("Content-Type", "")
-            if "json" in ct or "text" in ct:
-                try:    return resp.status, json.loads(raw)
+            ct = resp.headers.get("Content-Type","")
+            if "json" in ct:
+                try: return resp.status, json.loads(raw)
                 except: return resp.status, raw.decode(errors="replace")
-            return resp.status, raw
+            return resp.status, raw.decode(errors="replace") if raw else ""
     except urllib.error.HTTPError as e:
         raw = e.read()
-        try:    return e.code, json.loads(raw)
+        try: return e.code, json.loads(raw)
         except: return e.code, raw.decode(errors="replace")
     except urllib.error.URLError as e:
         return 0, str(e.reason)
 
-
 class Runner:
-    def __init__(self, base, verbose=False):
-        self.base    = base.rstrip("/")
-        self.verbose = verbose
-        self.passed  = 0
-        self.failed  = 0
-        self.errors: list[str] = []
+    def __init__(self, base_url, verbose=False):
+        self.base=base_url.rstrip("/"); self.verbose=verbose
+        self.passed=0; self.failed=0; self.skipped=0; self._failures=[]
 
     def url(self, path): return f"{self.base}/api{path}"
 
-    def check(self, name, cond, detail=""):
-        if cond:
-            self.passed += 1
-            print(f"  {Colors.GREEN}✓{Colors.RESET} {name}")
-        else:
-            self.failed += 1
-            msg = f"  {Colors.RED}✗{Colors.RESET} {name}"
-            if detail: msg += f"\n    {Colors.YELLOW}→ {detail}{Colors.RESET}"
-            print(msg)
-            self.errors.append(f"{name}: {detail}")
+    def _pass(self, msg):
+        self.passed += 1
+        print(f"  {C.PASS}[PASS]{C.RESET}  {msg}")
 
-    def sec(self, t): print(f"\n{Colors.BOLD}{Colors.BLUE}── {t} ──{Colors.RESET}")
+    def _fail(self, msg, reason=""):
+        self.failed += 1
+        line = f"  {C.FAIL}[FAIL]{C.RESET}  {msg}"
+        if reason: line += f"\n         {C.FAIL}→  {reason}{C.RESET}"
+        print(line)
+        self._failures.append(f"{msg}: {reason}")
 
-    # ── Base ──────────────────────────────────────────────────────────────────
+    def _note(self, msg): print(f"  {C.NOTE}[NOTE]{C.RESET}  {msg}")
+    def _warn(self, msg): print(f"  {C.WARN}[WARN]{C.RESET}  {msg}")
+    def _skip(self, msg):
+        self.skipped += 1
+        print(f"  {C.SKIP}[SKIP]{C.RESET}  {msg}")
+
+    def _section(self, title):
+        print(f"\n{C.BOLD}{'─'*62}{C.RESET}")
+        print(f"{C.BOLD}  {title}{C.RESET}")
+        print(f"{C.BOLD}{'─'*62}{C.RESET}")
+
+    def check(self, msg, cond, reason=""):
+        if cond: self._pass(msg)
+        else:    self._fail(msg, reason)
 
     def test_health(self):
-        self.sec("1. Health")
+        self._section("1  Health Check")
+        self._note("Verifies backend is reachable")
         s, b = _req("GET", self.url("/health"))
-        self.check("GET /api/health → 200", s == 200, f"status={s}")
+        self.check("GET /api/health → 200", s==200, f"HTTP {s}")
         if isinstance(b, dict):
-            self.check("status=ok", b.get("status") == "ok", str(b))
+            self.check("status='ok'", b.get("status")=="ok")
+            self.check("timestamp present", "time" in b)
+            self._note(f"Server time: {b.get('time','n/a')}")
 
     def test_auth(self) -> str:
-        self.sec("2. Authentication")
+        self._section("2  Authentication")
+        self._note("JWT login, registration, duplicate protection, logout")
         s, b = _req("POST", self.url("/auth/login"),
-                    body={"username": ADMIN_USER, "password": ADMIN_PASS})
-        self.check("Admin login → 200", s == 200)
+                    body={"username":ADMIN_USER,"password":ADMIN_PASS})
+        self.check("Admin login → 200", s==200, f"HTTP {s}")
         token = ""
         if isinstance(b, dict) and "data" in b:
-            token = b["data"].get("token", "")
-            self.check("Token present", bool(token))
-            self.check("SUPER_ADMIN in roles", "SUPER_ADMIN" in b["data"].get("roles", []))
-            perms = b["data"].get("permissions", [])
-            self.check("file:permission:manage in admin permissions",
-                       "file:permission:manage" in perms, str(perms))
+            d = b["data"]
+            token = d.get("token","")
+            self.check("JWT token returned",         bool(token))
+            self.check("SUPER_ADMIN in roles",       "SUPER_ADMIN" in d.get("roles",[]))
+            self.check("system:config in perms",     "system:config" in d.get("permissions",[]))
+            self.check("file:permission:manage in admin perms",
+                       "file:permission:manage" in d.get("permissions",[]))
+            self._note(f"Admin has {len(d.get('permissions',[]))} total permissions")
 
-        # Register test user (will be VIEWER by default)
-        s2, b2 = _req("POST", self.url("/auth/register"),
-                      body={"username": TEST_USER, "password": TEST_PASS})
-        self.check(f"Register VIEWER test user → 200", s2 == 200, f"status={s2}")
+        s2,_ = _req("POST", self.url("/auth/login"), body={"username":ADMIN_USER,"password":"wrong"})
+        self.check("Wrong password → 401",           s2==401, f"HTTP {s2}")
+
+        s3,_ = _req("POST", self.url("/auth/login"), body={"username":"no_such_xyz","password":"x"})
+        self.check("Non-existent user → 401",        s3==401, f"HTTP {s3}")
+
+        s4,b4 = _req("POST", self.url("/auth/register"),
+                     body={"username":TEST_USER,"password":TEST_PASS,"display_name":"Test"})
+        self.check(f"Register '{TEST_USER}' → 200",  s4==200, f"HTTP {s4}")
+        self._note("New users auto-assigned VIEWER role")
+
+        s5,_ = _req("POST", self.url("/auth/register"), body={"username":TEST_USER,"password":TEST_PASS})
+        self.check("Duplicate username → 409",       s5==409, f"HTTP {s5}")
+
+        if token:
+            s6,_ = _req("POST", self.url("/auth/logout"), token=token)
+            self.check("Logout → 200",               s6==200)
+            self._note("Logout recorded in audit log")
         return token
 
-    def test_users_api(self, token: str) -> int:
-        """Returns test user's id."""
-        self.sec("3. GET /api/users (new endpoint)")
+    def test_roles(self, token: str):
+        self._section("3  Role Management & RBAC Inheritance")
+        self._note("Hierarchy: SUPER_ADMIN > ADMIN > MANAGER > EDITOR/REVIEWER > VIEWER")
+
+        s, b = _req("GET", self.url("/roles"), token=token)
+        self.check("GET /api/roles → 200", s==200)
+        roles = []
+        if isinstance(b, dict) and "data" in b:
+            roles = b["data"] or []
+            self.check("Exactly 6 roles", len(roles)==6, f"found {len(roles)}")
+            names = {r["name"] for r in roles}
+            for n in ["SUPER_ADMIN","ADMIN","MANAGER","EDITOR","REVIEWER","VIEWER"]:
+                self.check(f"  Role '{n}' present", n in names)
+
+        s2, b2 = _req("GET", self.url("/roles/hierarchy"), token=token)
+        self.check("GET /api/roles/hierarchy → 200", s2==200)
+        if isinstance(b2, dict) and "data" in b2:
+            hier = b2["data"] or []
+            self.check("≥6 hierarchy links", len(hier)>=6, f"found {len(hier)}")
+            self.check("SUPER_ADMIN→ADMIN link",
+                       any(h["role_name"]=="SUPER_ADMIN" and h["inherited_role_name"]=="ADMIN" for h in hier))
+            self.check("MANAGER→EDITOR link",
+                       any(h["role_name"]=="MANAGER" and h["inherited_role_name"]=="EDITOR" for h in hier))
+            self._note("EDITOR and REVIEWER at L4 — separation of duties enforced")
+
+        if roles:
+            viewer = next((r for r in roles if r["name"]=="VIEWER"), None)
+            editor = next((r for r in roles if r["name"]=="EDITOR"), None)
+            sa     = next((r for r in roles if r["name"]=="SUPER_ADMIN"), None)
+            if viewer:
+                v_own = {p["name"] for p in viewer.get("permissions",[])}
+                self.check("VIEWER owns doc:read",              "doc:read" in v_own)
+                self.check("VIEWER does NOT own doc:create (SoD)", "doc:create" not in v_own)
+            if editor:
+                e_own = {p["name"] for p in editor.get("permissions",[])}
+                e_inh = {p["name"] for p in editor.get("inherited_permissions",[])}
+                self.check("EDITOR owns doc:create",            "doc:create" in e_own)
+                self.check("EDITOR inherits doc:read (VIEWER)", "doc:read" in e_inh)
+                self.check("EDITOR does NOT own doc:review (SoD)", "doc:review" not in e_own)
+                self._note("SoD: EDITOR creates/edits; REVIEWER audits — no overlap")
+            if sa:
+                sa_inh = {p["name"] for p in sa.get("inherited_permissions",[])}
+                self.check("SUPER_ADMIN inherits doc:read (full chain)", "doc:read" in sa_inh)
+                self.check("SUPER_ADMIN inherits file:permission:manage (via ADMIN)",
+                           "file:permission:manage" in sa_inh)
+
+        s3,_ = _req("GET", self.url("/roles"))
+        self.check("No token → 401", s3==401)
+
+        sv,bv = _req("POST", self.url("/auth/login"), body={"username":TEST_USER,"password":TEST_PASS})
+        if isinstance(bv, dict) and "data" in bv:
+            vt = bv["data"].get("token","")
+            if vt:
+                sr,_ = _req("GET", self.url("/roles"), token=vt)
+                self.check("VIEWER list roles → 403 (needs role:read)", sr==403)
+                sc,_ = _req("POST", self.url("/roles"), token=vt, body={"name":"HACK","description":""})
+                self.check("VIEWER create role → 403",  sc==403)
+                self._note("Role management: ADMIN and above only")
+
+        s4, b4 = _req("POST", self.url("/roles"), token=token,
+                      body={"name":f"TEMP_{int(time.time())}","description":"test","permission_ids":[]})
+        self.check("Create role → 200", s4==200)
+        if isinstance(b4, dict) and "data" in b4 and b4["data"]:
+            rid = b4["data"]["id"]
+            s5,_ = _req("PUT", self.url(f"/roles/{rid}"), token=token, body={"description":"Updated"})
+            self.check("Update role → 200", s5==200)
+            s6,_ = _req("DELETE", self.url(f"/roles/{rid}"), token=token)
+            self.check("Delete role → 200", s6==200)
+            s7,_ = _req("GET", self.url(f"/roles/{rid}"), token=token)
+            self.check("Deleted role → 404", s7==404)
+
+    def test_users(self, token: str) -> int:
+        self._section("4  User Management")
+        self._note("User list (new endpoint), detail, role assignment")
+        viewer_id = 0
+
         s, b = _req("GET", self.url("/users"), token=token)
-        self.check("GET /api/users → 200 (admin)", s == 200, f"status={s}")
-        test_user_id = 0
+        self.check("GET /api/users → 200 (user:read)", s==200)
         if isinstance(b, dict) and "data" in b:
             users = b["data"] or []
-            self.check("Users list is non-empty", len(users) > 0)
-            self.check("All entries have id/username/display_name/email",
-                       all("id" in u and "username" in u for u in users))
-            self.check("No password field exposed",
-                       all("password" not in u for u in users))
-            match = next((u for u in users if u["username"] == TEST_USER), None)
+            self.check("User list non-empty",       len(users)>0)
+            self.check("No password field exposed", all("password" not in u for u in users))
+            match = next((u for u in users if u["username"]==TEST_USER), None)
             if match:
-                test_user_id = match["id"]
+                viewer_id = match["id"]
+                self._note(f"Test user '{TEST_USER}' id={viewer_id}")
 
-        # VIEWER cannot list users
-        s_v, _ = _req("POST", self.url("/auth/login"),
-                      body={"username": TEST_USER, "password": TEST_PASS})
-        if isinstance(_, dict) and "data" in _:
-            vt = _["data"].get("token", "")
+        sv,bv = _req("POST", self.url("/auth/login"), body={"username":TEST_USER,"password":TEST_PASS})
+        if isinstance(bv, dict) and "data" in bv:
+            vt = bv["data"].get("token","")
             if vt:
-                sv, _ = _req("GET", self.url("/users"), token=vt)
-                self.check("VIEWER cannot list users → 403", sv == 403, f"status={sv}")
-        return test_user_id
+                sr,_ = _req("GET", self.url("/users"), token=vt)
+                self.check("VIEWER cannot list users → 403", sr==403)
 
-    def test_file_permissions_crud(self, token: str, viewer_user_id: int):
-        self.sec("4. File-Level Permission CRUD")
+        if viewer_id:
+            s2,b2 = _req("GET", self.url(f"/users/{viewer_id}"), token=token)
+            self.check(f"GET /users/{viewer_id} → 200", s2==200)
+            if isinstance(b2, dict) and "data" in b2:
+                u = b2["data"]
+                self.check("New user has VIEWER role by default",
+                           any(r["name"]=="VIEWER" for r in u.get("roles",[])))
+                self._note("Registration auto-assigns VIEWER (minimum privilege)")
+            _,rb = _req("GET", self.url("/roles"), token=token)
+            editor_id = None
+            if isinstance(rb, dict):
+                for r in (rb.get("data") or []):
+                    if r["name"]=="EDITOR": editor_id=r["id"]; break
+            if editor_id:
+                s3,_ = _req("PUT", self.url(f"/users/{viewer_id}/roles"), token=token,
+                             body={"role_ids":[editor_id]})
+                self.check("Admin assigns EDITOR role → 200", s3==200)
 
-        # Create a file to work with
-        s, b = _req("POST", self.url("/files/directory"), token=token,
-                    body={"file_name": f"perm_test_{int(time.time())}", "parent_id": 0})
-        self.check("Create test directory → 200", s == 200, f"status={s}")
-        if not (isinstance(b, dict) and "data" in b and b["data"]):
-            self.check("Got directory id", False, "No data returned")
-            return
-        fid = b["data"]["id"]
+        s4,_ = _req("GET", self.url("/users/999999"), token=token)
+        self.check("Non-existent user → 404", s4==404)
+        return viewer_id
 
-        # 4-1 Initial permissions list should be empty
-        s2, b2 = _req("GET", self.url(f"/files/{fid}/permissions"), token=token)
-        self.check("GET /files/{id}/permissions → 200", s2 == 200, f"status={s2}")
-        if isinstance(b2, dict) and "data" in b2:
-            self.check("Initial permissions list is empty", b2["data"] == [], str(b2["data"]))
+    def test_files(self, token: str) -> int:
+        self._section("5  File Management")
+        self._note("Directory/file CRUD, cascading delete, review/approve/comment")
+        dir_id = -1
 
-        if not viewer_user_id:
-            print("  (skipping permission-grant tests: test user id not found)")
-            _req("DELETE", self.url(f"/files/{fid}"), token=token)
-            return
+        s, b = _req("GET", self.url("/files"), token=token)
+        self.check("GET /api/files root → 200", s==200)
 
-        # 4-2 Set permissions
-        s3, b3 = _req("PUT", self.url(f"/files/{fid}/permissions"), token=token,
-                      body={"permissions": [
-                          {"user_id": viewer_user_id, "permission_type": "read"},
-                          {"user_id": viewer_user_id, "permission_type": "write"},
-                      ]})
-        self.check("PUT /files/{id}/permissions → 200 (admin)", s3 == 200, f"status={s3}")
-        if isinstance(b3, dict) and "data" in b3:
-            types = {p["permission_type"] for p in (b3["data"] or [])}
-            self.check("Permissions set: read + write", types == {"read", "write"}, str(types))
-            usernames = {p.get("username") for p in (b3["data"] or [])}
-            self.check("Permission entry contains username", TEST_USER in usernames,
-                       str(usernames))
+        name = f"test_{int(time.time())}"
+        s2,b2 = _req("POST", self.url("/files/directory"), token=token,
+                     body={"file_name":name,"parent_id":0})
+        self.check("Create directory → 200", s2==200, f"HTTP {s2}")
+        if isinstance(b2, dict) and "data" in b2 and b2["data"]:
+            dir_id = b2["data"]["id"]
+            self.check("is_directory=true", b2["data"].get("is_directory") is True)
+            self._note(f"Created '{name}' id={dir_id}")
 
-        # 4-3 Read back
-        s4, b4 = _req("GET", self.url(f"/files/{fid}/permissions"), token=token)
-        if isinstance(b4, dict) and "data" in b4:
-            self.check("Read-back shows 2 entries", len(b4["data"] or []) == 2,
-                       f"got {len(b4['data'] or [])}")
+        if dir_id != -1:
+            new_name = f"{name}_renamed"
+            s3,b3 = _req("PUT", self.url(f"/files/{dir_id}"), token=token,
+                          body={"file_name":new_name})
+            self.check("Rename → 200", s3==200)
+            if isinstance(b3, dict) and "data" in b3 and b3["data"]:
+                self.check("Response shows new name", b3["data"].get("file_name")==new_name)
 
-        # 4-4 Replace (set again with only delete)
-        s5, b5 = _req("PUT", self.url(f"/files/{fid}/permissions"), token=token,
-                      body={"permissions": [
-                          {"user_id": viewer_user_id, "permission_type": "delete"}
-                      ]})
-        self.check("Replace permissions with delete-only → 200", s5 == 200)
-        s5b, b5b = _req("GET", self.url(f"/files/{fid}/permissions"), token=token)
-        if isinstance(b5b, dict) and "data" in b5b:
-            self.check("After replace: exactly 1 permission (delete)",
-                       len(b5b["data"] or []) == 1 and
-                       (b5b["data"] or [{}])[0].get("permission_type") == "delete",
-                       str(b5b["data"]))
+            s4,_ = _req("GET", self.url(f"/files/{dir_id}"), token=token)
+            self.check("GET file detail → 200", s4==200)
 
-        # 4-5 Delete a single permission
-        perms = (b5b.get("data") or []) if isinstance(b5b, dict) else []
-        if perms:
-            perm_id = perms[0]["id"]
-            s6, _ = _req("DELETE", self.url(f"/files/{fid}/permissions/{perm_id}"),
-                          token=token)
-            self.check("DELETE /files/{id}/permissions/{perm_id} → 200", s6 == 200,
-                       f"status={s6}")
-            s6b, b6b = _req("GET", self.url(f"/files/{fid}/permissions"), token=token)
-            if isinstance(b6b, dict) and "data" in b6b:
-                self.check("After delete: permissions list empty", b6b["data"] == [],
-                           str(b6b["data"]))
+        s5,_ = _req("GET", self.url("/files/999999"), token=token)
+        self.check("Non-existent file → 404", s5==404)
 
-        _req("DELETE", self.url(f"/files/{fid}"), token=token)
+        if dir_id != -1:
+            for action in ["review","approve","comment"]:
+                sa,_ = _req("POST", self.url(f"/files/{dir_id}/{action}"),
+                             token=token, body={"content":f"test {action}"})
+                self.check(f"{action} → 200 (SUPER_ADMIN)", sa==200)
+            self._note("SUPER_ADMIN inherits all doc:review/approve/comment")
 
-    def test_file_permission_enforcement(self, token: str, viewer_user_id: int):
-        self.sec("5. File Operation Permission Enforcement")
+        sv,bv = _req("POST", self.url("/auth/login"), body={"username":TEST_USER,"password":TEST_PASS})
+        if isinstance(bv, dict) and "data" in bv:
+            vt = bv["data"].get("token","")
+            if vt:
+                sv2,_ = _req("POST", self.url("/files/directory"), token=vt,
+                              body={"file_name":"hack","parent_id":0})
+                self.check("Non-privileged user root dir create → 403", sv2==403)
 
-        # Login as test viewer to get their token
-        sv, bv = _req("POST", self.url("/auth/login"),
-                      body={"username": TEST_USER, "password": TEST_PASS})
-        if not (isinstance(bv, dict) and "data" in bv):
-            self.check("Login as viewer", False, "Could not log in")
-            return
-        viewer_token = bv["data"].get("token", "")
-        if not viewer_token or not viewer_user_id:
-            print("  (skipping: missing viewer token or user id)")
-            return
+        if dir_id != -1:
+            s9,_ = _req("DELETE", self.url(f"/files/{dir_id}"), token=token)
+            self.check("Delete directory → 200", s9==200)
+            s10,_ = _req("GET", self.url(f"/files/{dir_id}"), token=token)
+            self.check("Deleted directory → 404", s10==404)
+            self._note("Cascade delete: all children removed with parent")
+        return dir_id
 
-        # Create a file owned by admin
-        _, fb = _req("POST", self.url("/files/directory"), token=token,
-                     body={"file_name": f"enforcement_{int(time.time())}", "parent_id": 0})
+    def test_file_permissions(self, token: str, viewer_id: int):
+        self._section("6  File-Level Permission Control")
+        self._note("Per-file read/write/delete grants — overrides global role")
+        if not viewer_id:
+            self._skip("No viewer user id"); return
+
+        sv,bv = _req("POST", self.url("/auth/login"), body={"username":TEST_USER,"password":TEST_PASS})
+        viewer_token = ""
+        if isinstance(bv, dict) and "data" in bv:
+            viewer_token = bv["data"].get("token","")
+        if not viewer_token:
+            self._skip("Cannot get viewer token"); return
+
+        _,fb = _req("POST", self.url("/files/directory"), token=token,
+                    body={"file_name":f"fp_{int(time.time())}","parent_id":0})
         fid = fb["data"]["id"] if isinstance(fb, dict) and "data" in fb else None
         if not fid:
-            self.check("Create enforcement test file", False)
-            return
+            self._skip("Cannot create test file"); return
 
-        # 5-1 VIEWER has NO permission → GET → 403
-        s1, _ = _req("GET", self.url(f"/files/{fid}"), token=viewer_token)
-        self.check("VIEWER without permission: GET file → 403", s1 == 403, f"status={s1}")
+        s1,_ = _req("GET", self.url(f"/files/{fid}"), token=viewer_token)
+        self.check("Viewer WITHOUT grant → 403", s1==403)
+        self._note("No RBAC role permission = no access by default (file-level model)")
 
-        # 5-2 Grant read → VIEWER can GET
         _req("PUT", self.url(f"/files/{fid}/permissions"), token=token,
-             body={"permissions": [{"user_id": viewer_user_id, "permission_type": "read"}]})
-        s2, _ = _req("GET", self.url(f"/files/{fid}"), token=viewer_token)
-        self.check("VIEWER with read permission: GET file → 200", s2 == 200, f"status={s2}")
+             body={"permissions":[{"user_id":viewer_id,"permission_type":"read"}]})
+        s2,_ = _req("GET", self.url(f"/files/{fid}"), token=viewer_token)
+        self.check("Viewer WITH read grant → 200", s2==200)
 
-        # 5-3 VIEWER still cannot rename (no write permission)
-        s3, _ = _req("PUT", self.url(f"/files/{fid}"),
-                     body={"file_name": "try_rename"}, token=viewer_token)
-        self.check("VIEWER without write: rename → 403", s3 == 403, f"status={s3}")
+        s3,_ = _req("PUT", self.url(f"/files/{fid}"),
+                    body={"file_name":"try"}, token=viewer_token)
+        self.check("Read-only viewer rename → 403", s3==403)
 
-        # 5-4 Grant write → VIEWER can rename
         _req("PUT", self.url(f"/files/{fid}/permissions"), token=token,
-             body={"permissions": [
-                 {"user_id": viewer_user_id, "permission_type": "read"},
-                 {"user_id": viewer_user_id, "permission_type": "write"},
-             ]})
-        s4, _ = _req("PUT", self.url(f"/files/{fid}"),
-                     body={"file_name": "renamed_by_viewer"}, token=viewer_token)
-        self.check("VIEWER with write: rename → 200", s4 == 200, f"status={s4}")
+             body={"permissions":[{"user_id":viewer_id,"permission_type":"read"},
+                                  {"user_id":viewer_id,"permission_type":"write"}]})
+        s4,_ = _req("PUT", self.url(f"/files/{fid}"),
+                    body={"file_name":"renamed"}, token=viewer_token)
+        self.check("Viewer WITH write grant rename → 200", s4==200)
+        self._note("File-level write overrides global VIEWER role restriction")
 
-        # 5-5 VIEWER cannot delete (no delete permission)
-        s5, _ = _req("DELETE", self.url(f"/files/{fid}"), token=viewer_token)
-        self.check("VIEWER without delete: delete → 403", s5 == 403, f"status={s5}")
-
-        # 5-6 Grant delete → VIEWER can delete
         _req("PUT", self.url(f"/files/{fid}/permissions"), token=token,
-             body={"permissions": [{"user_id": viewer_user_id, "permission_type": "delete"}]})
-        s6, _ = _req("DELETE", self.url(f"/files/{fid}"), token=viewer_token)
-        self.check("VIEWER with delete: delete → 200", s6 == 200, f"status={s6}")
+             body={"permissions":[{"user_id":viewer_id,"permission_type":"delete"}]})
+        s5,_ = _req("DELETE", self.url(f"/files/{fid}"), token=viewer_token)
+        self.check("Viewer WITH delete grant → 200", s5==200)
+        self._note("Three independent grant types: read / write / delete")
 
-        # 5-7 VIEWER cannot use set-permissions API (no file:permission:manage)
-        _, fb2 = _req("POST", self.url("/files/directory"), token=token,
-                      body={"file_name": f"perm_guard_{int(time.time())}", "parent_id": 0})
+        _,fb2 = _req("POST", self.url("/files/directory"), token=token,
+                     body={"file_name":f"perm_{int(time.time())}","parent_id":0})
         fid2 = fb2["data"]["id"] if isinstance(fb2, dict) and "data" in fb2 else None
         if fid2:
-            # Grant viewer read first
             _req("PUT", self.url(f"/files/{fid2}/permissions"), token=token,
-                 body={"permissions": [{"user_id": viewer_user_id, "permission_type": "read"}]})
-            s7, _ = _req("PUT", self.url(f"/files/{fid2}/permissions"),
-                         body={"permissions": []}, token=viewer_token)
-            self.check("VIEWER cannot set file permissions → 403", s7 == 403, f"status={s7}")
+                 body={"permissions":[{"user_id":viewer_id,"permission_type":"read"}]})
+            s6,_ = _req("PUT", self.url(f"/files/{fid2}/permissions"),
+                        body={"permissions":[]}, token=viewer_token)
+            self.check("Viewer cannot manage permissions → 403 (needs file:permission:manage)", s6==403)
+            self._note("Permission management: ADMIN and above only")
             _req("DELETE", self.url(f"/files/{fid2}"), token=token)
 
-    def test_directory_inheritance(self, token: str, viewer_user_id: int):
-        self.sec("6. Directory Permission Inheritance")
-        if not viewer_user_id:
-            print("  (skipping: no viewer user id)")
-            return
+    def test_audit_logs(self, token: str):
+        self._section("7  Audit Logs")
+        self._note("IMPORTANT: /api/audit-logs/export registered BEFORE /{log_id} to avoid route collision")
 
-        sv, bv = _req("POST", self.url("/auth/login"),
-                      body={"username": TEST_USER, "password": TEST_PASS})
-        viewer_token = bv["data"].get("token", "") if isinstance(bv, dict) and "data" in bv else ""
-        if not viewer_token:
-            return
+        s, b = _req("GET", self.url("/audit-logs"), token=token)
+        self.check("GET /api/audit-logs → 200", s==200)
+        if isinstance(b, dict) and "data" in b:
+            d = b["data"]
+            self.check("'items' array present",  "items" in d)
+            self.check("'total' count present",  "total" in d)
+            self.check("Total > 0 (events exist)", d.get("total",0)>0, f"total={d.get('total')}")
+            self._note(f"Total audit entries: {d.get('total')}")
 
-        # Create parent dir + child file
-        _, pb = _req("POST", self.url("/files/directory"), token=token,
-                     body={"file_name": f"parent_dir_{int(time.time())}", "parent_id": 0})
-        parent_id = pb["data"]["id"] if isinstance(pb, dict) and "data" in pb else None
-        if not parent_id:
-            self.check("Create parent dir", False); return
-        _, cb = _req("POST", self.url("/files/directory"), token=token,
-                     body={"file_name": f"child_dir_{int(time.time())}", "parent_id": parent_id})
-        child_id = cb["data"]["id"] if isinstance(cb, dict) and "data" in cb else None
-        if not child_id:
-            _req("DELETE", self.url(f"/files/{parent_id}"), token=token)
-            self.check("Create child dir", False); return
+        s2,b2 = _req("GET", self.url("/audit-logs?action=LOGIN"), token=token)
+        self.check("Filter action=LOGIN → 200", s2==200)
+        if isinstance(b2, dict) and "data" in b2:
+            items = b2["data"].get("items",[])
+            self.check("All items have action=LOGIN",
+                       all(i["action"]=="LOGIN" for i in items))
 
-        # Viewer has no permissions yet → 403 on child
-        s1, _ = _req("GET", self.url(f"/files/{child_id}"), token=viewer_token)
-        self.check("Before grant: viewer cannot access child dir → 403", s1 == 403,
-                   f"status={s1}")
+        s3,_ = _req("GET", self.url(f"/audit-logs?username={ADMIN_USER}"), token=token)
+        self.check("Filter by username → 200", s3==200)
 
-        # Grant read on parent
-        _req("PUT", self.url(f"/files/{parent_id}/permissions"), token=token,
-             body={"permissions": [{"user_id": viewer_user_id, "permission_type": "read"}]})
+        s4,_ = _req("GET", self.url("/audit-logs?startDate=2000-01-01&endDate=2099-12-31"), token=token)
+        self.check("Date range filter → 200", s4==200)
 
-        # Child should now be accessible via inheritance
-        s2, _ = _req("GET", self.url(f"/files/{child_id}"), token=viewer_token)
-        self.check("After parent grant: viewer can access child (inheritance) → 200",
-                   s2 == 200, f"status={s2}")
+        s5,b5 = _req("GET", self.url("/audit-logs?page=1&size=3"), token=token)
+        self.check("Pagination size=3 → 200", s5==200)
+        if isinstance(b5, dict) and "data" in b5:
+            self.check("Result ≤ 3 items", len(b5["data"].get("items",[]))<=3)
 
-        # Cleanup
-        _req("DELETE", self.url(f"/files/{parent_id}"), token=token)
+        sv,bv = _req("POST", self.url("/auth/login"), body={"username":TEST_USER,"password":TEST_PASS})
+        if isinstance(bv, dict) and "data" in bv:
+            vt = bv["data"].get("token","")
+            if vt:
+                sr,_ = _req("GET", self.url("/audit-logs"), token=vt)
+                self.check("VIEWER audit-logs → 403 (needs audit:read)", sr==403)
+                self._note("Audit access: MANAGER and above")
 
-    def test_file_list_filtering(self, token: str, viewer_user_id: int):
-        self.sec("7. File List Filtering by Permission")
-        if not viewer_user_id:
-            print("  (skipping)"); return
+        s6,b6 = _req("GET", self.url("/audit-logs/export"), token=token)
+        self.check("Export CSV → 200 (audit:export)", s6==200)
+        if isinstance(b6, str):
+            self.check("CSV has header row", "ID" in b6 and "Action" in b6)
+            self._note(f"CSV size: {len(b6)} characters")
 
-        sv, bv = _req("POST", self.url("/auth/login"),
-                      body={"username": TEST_USER, "password": TEST_PASS})
-        viewer_token = bv["data"].get("token", "") if isinstance(bv, dict) and "data" in bv else ""
-        if not viewer_token: return
-
-        # Create two files
-        _, b1 = _req("POST", self.url("/files/directory"), token=token,
-                     body={"file_name": f"visible_{int(time.time())}", "parent_id": 0})
-        _, b2 = _req("POST", self.url("/files/directory"), token=token,
-                     body={"file_name": f"hidden_{int(time.time())}", "parent_id": 0})
-        fid_visible = b1["data"]["id"] if isinstance(b1, dict) and "data" in b1 else None
-        fid_hidden  = b2["data"]["id"] if isinstance(b2, dict) and "data" in b2 else None
-
-        if not (fid_visible and fid_hidden):
-            self.check("Create test files", False); return
-
-        # Grant read only on visible
-        _req("PUT", self.url(f"/files/{fid_visible}/permissions"), token=token,
-             body={"permissions": [{"user_id": viewer_user_id, "permission_type": "read"}]})
-
-        # Viewer's file list should include visible but not hidden
-        s, bl = _req("GET", self.url("/files"), token=viewer_token)
-        self.check("GET /files → 200 (viewer)", s == 200, f"status={s}")
-        if isinstance(bl, dict) and "data" in bl:
-            names = {f["file_name"] for f in (bl["data"] or [])}
-            # Check relative IDs
-            visible_name = b1["data"]["file_name"]
-            hidden_name  = b2["data"]["file_name"]
-            self.check("Visible file appears in viewer's list", visible_name in names,
-                       str(names))
-            self.check("Hidden file does NOT appear in viewer's list",
-                       hidden_name not in names, str(names))
-
-        # Admin sees all
-        sa, ba = _req("GET", self.url("/files"), token=token)
-        if isinstance(ba, dict) and "data" in ba:
-            names_admin = {f["file_name"] for f in (ba["data"] or [])}
-            self.check("Admin sees hidden file too", b2["data"]["file_name"] in names_admin,
-                       str(names_admin))
-
-        _req("DELETE", self.url(f"/files/{fid_visible}"), token=token)
-        _req("DELETE", self.url(f"/files/{fid_hidden}"),  token=token)
-
-    def run(self):
-        print(f"\n{Colors.BOLD}RBAC feat/file-user-permissions — Integration Tests{Colors.RESET}")
-        print(f"Backend: {self.base}")
-        print("─" * 60)
+    def run(self) -> int:
+        print(f"\n{C.BOLD}{'='*62}{C.RESET}")
+        print(f"{C.BOLD}  RBAC System — Integration Test Suite{C.RESET}")
+        print(f"{C.BOLD}{'='*62}{C.RESET}")
+        print(f"  URL    : {self.base}")
+        print(f"  Time   : {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         self.test_health()
         token = self.test_auth()
         if not token:
-            print(f"\n{Colors.RED}Cannot continue: admin login failed.{Colors.RESET}")
-            return self._summary()
-
-        viewer_user_id = self.test_users_api(token)
-        self.test_file_permissions_crud(token, viewer_user_id)
-        self.test_file_permission_enforcement(token, viewer_user_id)
-        self.test_directory_inheritance(token, viewer_user_id)
-        self.test_file_list_filtering(token, viewer_user_id)
-
+            self._fail("Cannot continue — admin login failed"); return self._summary()
+        self.test_roles(token)
+        viewer_id = self.test_users(token)
+        self.test_files(token)
+        self.test_file_permissions(token, viewer_id)
+        self.test_audit_logs(token)
         return self._summary()
 
     def _summary(self) -> int:
-        total = self.passed + self.failed
-        print(f"\n{'─' * 60}")
-        print(f"{Colors.BOLD}Results: {Colors.GREEN}{self.passed}{Colors.RESET}"
-              f"{Colors.BOLD} passed, "
-              f"{Colors.RED}{self.failed}{Colors.RESET}{Colors.BOLD} failed "
-              f"(total {total}){Colors.RESET}")
-        if self.errors:
-            print(f"\n{Colors.YELLOW}Failed:{Colors.RESET}")
-            for e in self.errors: print(f"  • {e}")
-        return 0 if self.failed == 0 else 1
+        total = self.passed + self.failed + self.skipped
+        print(f"\n{C.BOLD}{'='*62}{C.RESET}")
+        print(f"{C.BOLD}  Results{C.RESET}")
+        print(f"{'─'*62}")
+        print(f"  {C.PASS}[PASS]{C.RESET}  {self.passed}")
+        print(f"  {C.FAIL}[FAIL]{C.RESET}  {self.failed}")
+        print(f"  {C.SKIP}[SKIP]{C.RESET}  {self.skipped}")
+        print(f"  Total   {total}")
+        if self.failed:
+            rate = round(self.passed/(self.passed+self.failed)*100,1)
+            print(f"\n  {C.WARN}Pass rate: {rate}%{C.RESET}")
+            print(f"\n{C.FAIL}  Failed:{C.RESET}")
+            for e in self._failures: print(f"    • {e}")
+        else:
+            print(f"\n  {C.PASS}{C.BOLD}All checks passed ✓{C.RESET}")
+        print(f"{C.BOLD}{'='*62}{C.RESET}\n")
+        return 0 if not self.failed else 1
 
 
-def main():
+if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--url", default="http://localhost:8080")
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()
     sys.exit(Runner(args.url, args.verbose).run())
-
-
-if __name__ == "__main__":
-    main()

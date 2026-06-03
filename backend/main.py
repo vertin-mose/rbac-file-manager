@@ -13,11 +13,13 @@ from auth import get_current_user
 from config import settings
 from models import ApiResponse
 from services import (
-    assign_permissions, assign_user_roles, batch_delete_audit_logs, create_directory, create_role,
-    delete_audit_log, delete_file, delete_file_permission, delete_role, export_audit_logs,
-    get_effective_permissions, get_file, get_file_content, get_file_permissions, get_hierarchy,
-    get_role, get_user_info, list_files, list_roles, list_users, login, query_audit_logs,
-    record_audit, register, rename_file, set_file_permissions, share_file, update_role, upload_file,
+    assign_permissions, assign_user_roles, batch_delete_audit_logs, can_manage_file_permissions,
+    create_directory, create_role, delete_audit_log, delete_file, delete_file_permission, delete_role,
+    ensure_missing_permissions, export_audit_logs, get_effective_permissions, get_file,
+    get_file_content, get_file_permissions, get_hierarchy, get_role, get_user_info, list_files,
+    list_roles, list_users, login, query_audit_logs, record_audit, register, rename_file,
+    review_file, approve_file,
+    set_file_permissions, share_file, update_role, upload_file,
 )
 
 # ── Database ───────────────────────────────────────────────────────────────
@@ -38,6 +40,11 @@ def get_db():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db = SessionLocal()
+    try:
+        ensure_missing_permissions(db)
+    finally:
+        db.close()
     yield
     engine.dispose()
 
@@ -202,8 +209,10 @@ def api_list_files(parentId: int = Query(0), request: Request = None,
 @app.get("/api/files/{file_id}")
 async def api_get_file(file_id: int, request: Request = None, db: Session = Depends(get_db)):
     await get_current_user(request)
-    return ApiResponse.success(get_file(db, file_id,
-                                        request.state.user_id, request.state.roles))
+    result = get_file(db, file_id, request.state.user_id, request.state.roles)
+    record_audit(db, request.state.user_id, request.state.username, "VIEW_FILE",
+                 detail=f"查看了文件{result.get('file_name', file_id)}")
+    return ApiResponse.success(result)
 
 
 @app.get("/api/files/{file_id}/download")
@@ -211,6 +220,8 @@ async def api_download_file(file_id: int, request: Request = None, db: Session =
     await get_current_user(request)
     content, mime_type, file_name = get_file_content(db, file_id,
                                                       request.state.user_id, request.state.roles)
+    record_audit(db, request.state.user_id, request.state.username, "DOWNLOAD_FILE",
+                 detail=f"下载了文件{file_name}")
     return Response(content=content, media_type=mime_type,
                     headers={"Content-Disposition": f'inline; filename="{file_name}"'})
 
@@ -282,11 +293,12 @@ async def api_share_file(file_id: int, data: dict, request: Request,
     f = db.get(FileRecord, file_id)
     file_name = f.file_name if f else str(file_id)
     user_ids = data.get("user_ids", [])
-    role_ids = data.get("role_ids", [])
-    share_file(db, file_id, user_ids, role_ids)
-    record_audit(db, request.state.user_id, request.state.username, "SHARE_FILE",
-                 detail=f"共享了文件{file_name}，用户: {user_ids or '无'}，角色: {role_ids or '无'}")
-    return ApiResponse.success(message="File shared")
+    permission_type = data.get("permission_type", "read")
+    result = share_file(db, file_id, user_ids, permission_type)
+    if result["granted"]:
+        record_audit(db, request.state.user_id, request.state.username, "SHARE_FILE",
+                     detail=f"共享了文件{file_name}给用户 {result['granted']}，权限: {permission_type}")
+    return ApiResponse.success(result, message="File shared")
 
 
 @app.post("/api/files/{file_id}/review")
@@ -294,11 +306,11 @@ async def api_review_file(file_id: int, data: dict, request: Request,
                           db: Session = Depends(get_db)):
     await get_current_user(request)
     await require_perm("doc:review")(request, db)
-    from models import FileRecord
-    f = db.get(FileRecord, file_id)
+    comment = data.get("content", "")
+    result = review_file(db, file_id, request.state.user_id, comment)
     record_audit(db, request.state.user_id, request.state.username, "REVIEW_FILE",
-                 detail=f"审阅了文件{f.file_name if f else file_id}")
-    return ApiResponse.success(message="Review submitted")
+                 detail=f"审阅了文件{result.get('file_name', file_id)}，状态→审阅中")
+    return ApiResponse.success(result, message="Review submitted")
 
 
 @app.post("/api/files/{file_id}/approve")
@@ -306,11 +318,13 @@ async def api_approve_file(file_id: int, data: dict, request: Request,
                            db: Session = Depends(get_db)):
     await get_current_user(request)
     await require_perm("doc:approve")(request, db)
-    from models import FileRecord
-    f = db.get(FileRecord, file_id)
+    approved = data.get("approved", True)
+    comment = data.get("content", "")
+    result = approve_file(db, file_id, request.state.user_id, approved, comment)
+    status_label = "批准" if approved else "驳回"
     record_audit(db, request.state.user_id, request.state.username, "APPROVE_FILE",
-                 detail=f"批准了文件{f.file_name if f else file_id}")
-    return ApiResponse.success(message="File approved")
+                 detail=f"{status_label}了文件{result.get('file_name', file_id)}")
+    return ApiResponse.success(result, message=f"File {status_label}")
 
 
 @app.post("/api/files/{file_id}/comment")
@@ -321,7 +335,7 @@ async def api_comment_file(file_id: int, data: dict, request: Request,
     from models import FileRecord
     f = db.get(FileRecord, file_id)
     record_audit(db, request.state.user_id, request.state.username, "COMMENT_FILE",
-                 detail=f"评论了文件{f.file_name if f else file_id}")
+                 detail=f"评论了文件{f.file_name if f else file_id}：{data.get('content','')[:50]}")
     return ApiResponse.success(message="Comment added")
 
 
@@ -335,9 +349,11 @@ def api_get_file_permissions(file_id: int, request: Request, db: Session = Depen
 
 
 @app.put("/api/files/{file_id}/permissions")
-def api_set_file_permissions(file_id: int, data: dict, request: Request,
-                             db: Session = Depends(get_db),
-                             _=Depends(require_perm("file:permission:manage"))):
+async def api_set_file_permissions(file_id: int, data: dict, request: Request,
+                                   db: Session = Depends(get_db)):
+    await get_current_user(request)
+    if not can_manage_file_permissions(db, file_id, request.state.user_id, request.state.roles):
+        raise HTTPException(status_code=403, detail="No permission to manage file permissions")
     result = set_file_permissions(db, file_id, data.get("permissions", []))
     from models import FileRecord
     f = db.get(FileRecord, file_id)
@@ -347,13 +363,25 @@ def api_set_file_permissions(file_id: int, data: dict, request: Request,
 
 
 @app.delete("/api/files/{file_id}/permissions/{perm_id}")
-def api_delete_file_permission(file_id: int, perm_id: int, request: Request,
-                               db: Session = Depends(get_db),
-                               _=Depends(require_perm("file:permission:manage"))):
+async def api_delete_file_permission(file_id: int, perm_id: int, request: Request,
+                                     db: Session = Depends(get_db)):
+    await get_current_user(request)
+    if not can_manage_file_permissions(db, file_id, request.state.user_id, request.state.roles):
+        raise HTTPException(status_code=403, detail="No permission to manage file permissions")
     delete_file_permission(db, perm_id)
     record_audit(db, request.state.user_id, request.state.username, "DELETE_FILE_PERMISSION",
                  detail=f"删除了文件{file_id}的权限记录{perm_id}")
     return ApiResponse.success(message="File permission deleted")
+
+@app.get("/api/audit-logs/export")
+def api_export_audit(request: Request, action: str = Query(None), username: str = Query(None),
+                     startDate: str = Query(None), endDate: str = Query(None),
+                     db: Session = Depends(get_db),
+                     _=Depends(require_perm("audit:export"))):
+    csv_content = export_audit_logs(db, action, username, startDate, endDate)
+    return PlainTextResponse(content=csv_content, media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename=audit_logs.csv"})
+
 
 @app.get("/api/audit-logs")
 def api_audit_logs(request: Request, page: int = Query(1), size: int = Query(20),
@@ -379,16 +407,6 @@ def api_batch_delete_audit_logs(data: dict, request: Request, db: Session = Depe
         raise HTTPException(status_code=400, detail="ids is required")
     batch_delete_audit_logs(db, ids)
     return ApiResponse.success(message=f"{len(ids)} audit logs deleted")
-
-
-@app.get("/api/audit-logs/export")
-def api_export_audit(request: Request, action: str = Query(None), username: str = Query(None),
-                     startDate: str = Query(None), endDate: str = Query(None),
-                     db: Session = Depends(get_db),
-                     _=Depends(require_perm("audit:export"))):
-    csv_content = export_audit_logs(db, action, username, startDate, endDate)
-    return PlainTextResponse(content=csv_content, media_type="text/csv",
-                             headers={"Content-Disposition": "attachment; filename=audit_logs.csv"})
 
 
 # ── Health ─────────────────────────────────────────────────────────────────

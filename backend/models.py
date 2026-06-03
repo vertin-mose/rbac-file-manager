@@ -67,6 +67,11 @@ class FileRecord(Base):
     mime_type = Column(String(100))
     owner_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
     storage_url = Column(String(1000))
+    # Status for review workflow: draft → under_review → approved / rejected
+    status = Column(String(20), default="draft")
+    review_comment = Column(String(500))
+    reviewed_by = Column(BigInteger, ForeignKey("users.id"))
+    reviewed_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     deleted = Column(Boolean, default=False)

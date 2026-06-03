@@ -13,6 +13,16 @@
               <el-tag size="small" type="info" effect="plain">历史</el-tag>
               <strong>{{ act.username }}</strong>
               <span class="activity-time">{{ formatTime(act.createdAt) }}</span>
+              <el-button
+                v-if="canDelete(act)"
+                link
+                type="danger"
+                size="small"
+                class="delete-btn"
+                @click.stop="handleDelete(act)"
+              >
+                <el-icon><Delete /></el-icon>
+              </el-button>
             </div>
             <div v-if="act.activityType === 'approve'" class="activity-result">
               <el-tag :type="act.approved ? 'success' : 'danger'" size="small" effect="dark">
@@ -35,6 +45,16 @@
             <div class="activity-meta">
               <strong>{{ act.username }}</strong>
               <span class="activity-time">{{ formatTime(act.createdAt) }}</span>
+              <el-button
+                v-if="canDelete(act)"
+                link
+                type="danger"
+                size="small"
+                class="delete-btn"
+                @click.stop="handleDelete(act)"
+              >
+                <el-icon><Delete /></el-icon>
+              </el-button>
             </div>
             <div v-if="act.activityType === 'approve'" class="activity-result">
               <el-tag :type="act.approved ? 'success' : 'danger'" size="small" effect="dark">
@@ -88,9 +108,10 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { ArrowDown, ArrowRight } from '@element-plus/icons-vue'
-import { approveFile, commentFile, getFileActivities, reviewFile, type FileActivityItem } from '@/api/file'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown, ArrowRight, Delete } from '@element-plus/icons-vue'
+import { approveFile, commentFile, deleteActivity, getFileActivities, reviewFile, type FileActivityItem } from '@/api/file'
+import { useUserStore } from '@/store/user'
 
 const props = defineProps<{
   visible: boolean
@@ -104,6 +125,8 @@ const emit = defineEmits<{
   updated: []
 }>()
 
+const userStore = useUserStore()
+
 const loading = ref(false)
 const submitting = ref(false)
 const showHistory = ref(false)
@@ -112,6 +135,22 @@ const submitForm = reactive({
   content: '',
   approved: true,
 })
+
+function canDelete(act: FileActivityItem): boolean {
+  return userStore.userId === act.userId || userStore.highestLevel <= 2
+}
+
+async function handleDelete(act: FileActivityItem) {
+  try {
+    await ElMessageBox.confirm('确认删除此记录？', '删除确认', { type: 'warning' })
+    await deleteActivity(props.fileId, act.id)
+    ElMessage.success('已删除')
+    await loadActivities()
+    emit('updated')
+  } catch {
+    // cancelled or failed
+  }
+}
 
 const modeLabel = computed(() => {
   switch (props.mode) {
@@ -259,6 +298,16 @@ watch(() => props.visible, (val) => {
 .activity-time {
   color: #909399;
   font-size: 12px;
+}
+
+.delete-btn {
+  margin-left: auto;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.activity-item:hover .delete-btn {
+  opacity: 1;
 }
 
 .activity-result {

@@ -82,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { logout as apiLogout } from '@/api/auth'
@@ -90,6 +90,10 @@ import { logout as apiLogout } from '@/api/auth'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+
+onMounted(() => {
+  userStore.refreshPermissions()
+})
 
 const roleTagType = computed(() => {
   if (userStore.highestLevel <= 2) return 'danger'

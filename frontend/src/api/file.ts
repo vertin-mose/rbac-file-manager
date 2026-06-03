@@ -67,11 +67,15 @@ export function renameFile(id: number, newName: string) {
     return request.put(`/files/${id}`, { file_name: newName })
 }
 
-export function shareFile(id: number, payload: { userIds?: number[]; permissionType?: string }) {
+export function shareFile(id: number, payload: { userIds?: number[] }) {
     return request.post(`/files/${id}/share`, {
         user_ids: payload.userIds || [],
-        permission_type: payload.permissionType || 'read',
+        permission_type: 'read',
     })
+}
+
+export function deleteActivity(fileId: number, activityId: number): Promise<void> {
+    return request.delete(`/files/${fileId}/activities/${activityId}`)
 }
 
 export function reviewFile(id: number, content: string) {

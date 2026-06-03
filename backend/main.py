@@ -15,7 +15,7 @@ from models import ApiResponse, Base
 from services import (
     admin_create_user, admin_delete_user, assign_permissions, assign_user_roles,
     batch_delete_audit_logs, can_manage_file_permissions,
-    comment_file, create_directory, create_role, delete_audit_log, delete_file,
+    comment_file, create_directory, create_role, delete_activity, delete_audit_log, delete_file,
     delete_file_permission, delete_role,
     ensure_missing_columns, ensure_missing_permissions, export_audit_logs, get_effective_permissions,
     get_file, get_file_activities, get_file_content, get_file_permissions, get_hierarchy, get_role, get_user_info,
@@ -108,6 +108,24 @@ async def api_logout(request: Request, db: Session = Depends(get_db)):
     record_audit(db, request.state.user_id, request.state.username, "LOGOUT",
                  detail=f"用户{request.state.username}已登出", ip=get_client_ip(request))
     return ApiResponse.success(message="Logged out")
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(request: Request, db: Session = Depends(get_db)):
+    """Return current user info and effective permissions (fresh from DB, not cached)."""
+    await get_current_user(request)
+    from models import Role
+    all_perms = set()
+    for role_name in request.state.roles:
+        role = db.query(Role).filter(Role.name == role_name, Role.deleted == False).first()
+        if role:
+            all_perms |= get_effective_permissions(role.id, db)
+    return ApiResponse.success({
+        "user_id": request.state.user_id,
+        "username": request.state.username,
+        "roles": request.state.roles,
+        "permissions": sorted(all_perms),
+    })
 
 
 # ── Role Routes ────────────────────────────────────────────────────────────
@@ -267,7 +285,8 @@ async def api_download_file(file_id: int, request: Request = None, db: Session =
 
 @app.post("/api/files")
 async def api_upload_file(request: Request, file: UploadFile = File(...),
-                          parentId: int = Form(0), db: Session = Depends(get_db)):
+                          parentId: int = Form(0), db: Session = Depends(get_db),
+                          _=Depends(require_perm("doc:create"))):
     await get_current_user(request)
     if parentId:
         from services import _check_file_permission
@@ -281,7 +300,8 @@ async def api_upload_file(request: Request, file: UploadFile = File(...),
 
 
 @app.post("/api/files/directory")
-async def api_create_directory(data: dict, request: Request, db: Session = Depends(get_db)):
+async def api_create_directory(data: dict, request: Request, db: Session = Depends(get_db),
+                                _=Depends(require_perm("doc:create"))):
     await get_current_user(request)
     parent_id = data.get("parent_id", 0)
     if parent_id:
@@ -298,7 +318,8 @@ async def api_create_directory(data: dict, request: Request, db: Session = Depen
 
 @app.put("/api/files/{file_id}")
 async def api_rename_file(file_id: int, data: dict, request: Request,
-                          db: Session = Depends(get_db)):
+                          db: Session = Depends(get_db),
+                          _=Depends(require_perm("doc:update"))):
     await get_current_user(request)
     from models import FileRecord
     f = db.get(FileRecord, file_id)
@@ -312,7 +333,8 @@ async def api_rename_file(file_id: int, data: dict, request: Request,
 
 
 @app.delete("/api/files/{file_id}")
-async def api_delete_file(file_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_delete_file(file_id: int, request: Request, db: Session = Depends(get_db),
+                           _=Depends(require_perm("doc:delete"))):
     await get_current_user(request)
     from models import FileRecord
     f = db.get(FileRecord, file_id)
@@ -382,7 +404,8 @@ async def api_comment_file(file_id: int, data: dict, request: Request,
 @app.put("/api/files/{file_id}/content")
 async def api_update_file_content(file_id: int, request: Request,
                                    file: UploadFile = File(...),
-                                   db: Session = Depends(get_db)):
+                                   db: Session = Depends(get_db),
+                                   _=Depends(require_perm("doc:update"))):
     await get_current_user(request)
     result = update_file_content(db, file_id, file,
                                   request.state.user_id, request.state.roles)
@@ -398,6 +421,16 @@ async def api_get_file_activities(file_id: int, request: Request,
                                   db: Session = Depends(get_db)):
     await get_current_user(request)
     return ApiResponse.success(get_file_activities(db, file_id))
+
+
+@app.delete("/api/files/{file_id}/activities/{activity_id}")
+async def api_delete_activity(file_id: int, activity_id: int, request: Request,
+                               db: Session = Depends(get_db)):
+    await get_current_user(request)
+    delete_activity(db, activity_id, request.state.user_id, request.state.roles)
+    record_audit(db, request.state.user_id, request.state.username, "DELETE_ACTIVITY",
+                 detail=f"删除了文件{file_id}的活动记录{activity_id}")
+    return ApiResponse.success(message="Activity deleted")
 
 
 # ── Audit Routes ───────────────────────────────────────────────────────────

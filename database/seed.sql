@@ -6,15 +6,15 @@
 -- === Permissions (Document Management Focus) ===
 INSERT INTO permissions (name, description, category) VALUES
 -- Document permissions
-('doc:create',  'Create new documents and directories',    'document'),
-('doc:read',    'View, search and download documents',     'document'),
-('doc:update',  'Edit and modify document content',        'document'),
-('doc:delete',  'Delete documents and directories',        'document'),
+('doc:create',  'Create directories and upload files',                 'document'),
+('doc:read',    'View, preview, search and download documents',      'document'),
+('doc:update',  'Rename files or directories, update file content',  'document'),
+('doc:delete',  'Delete files and directories',                      'document'),
 ('doc:review',  'Review documents and suggest changes',    'document'),
 ('doc:approve', 'Approve/reject document reviews',         'document'),
 ('doc:comment', 'Add comments and annotations',            'document'),
 ('doc:share',   'Share documents with users or roles',     'document'),
-('doc:export',  'Export documents to PDF/other formats',   'document'),
+('doc:export',  'Download document files',                          'document'),
 -- User management permissions
 ('user:read',   'View user list and profiles',             'user'),
 ('user:create', 'Create new user accounts',                'user'),

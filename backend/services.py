@@ -349,6 +349,12 @@ def _is_privileged_role(roles: list[str]) -> bool:
 
 def _check_file_permission(db: Session, file_id: int, user_id: int,
                            roles: list[str], permission_type: str) -> bool:
+    """Pure additive file-level permission check.
+
+    FilePermission records only GRANT additional access on top of RBAC.
+    They never restrict users who already have the corresponding RBAC
+    permission (checked at the route level via require_perm).
+    """
     if _is_privileged_role(roles):
         return True
     f = db.get(FileRecord, file_id)
@@ -361,7 +367,7 @@ def _check_file_permission(db: Session, file_id: int, user_id: int,
     role_ids = [r.id for r in db.query(Role.id).filter(
         Role.name.in_(roles), Role.deleted == False).all()] if roles else []
 
-    # Walk up the directory tree to check user-level and role-level permissions
+    # Walk up the directory tree checking FilePermission records
     current = f
     while current is not None:
         # Check user-level permission
@@ -384,7 +390,11 @@ def _check_file_permission(db: Session, file_id: int, user_id: int,
                 break
         else:
             break
-    return False
+
+    # RBAC baseline: route-level require_perm already verified the user has
+    # the corresponding RBAC permission (doc:read / doc:update / doc:delete).
+    # FilePermission is purely additive — deny only if explicitly restricted.
+    return True
 
 
 def list_files(db: Session, parent_id: int = 0, user_id: int = None,
@@ -427,7 +437,8 @@ def list_files(db: Session, parent_id: int = 0, user_id: int = None,
             # Inherited from parent directory
             if parent_accessible:
                 return True
-            return False
+            # RBAC baseline: anyone with doc:read (verified at route level) can see files
+            return True
 
         files = [f for f in files if is_file_accessible(f)]
 
@@ -766,6 +777,23 @@ def get_file_activities(db: Session, file_id: int) -> list[dict]:
             "created_at": act.created_at.isoformat() if act.created_at else None,
         })
     return result
+
+
+def delete_activity(db: Session, activity_id: int, user_id: int, roles: list[str]):
+    """Delete a review or comment activity.
+
+    Only the author or SUPER_ADMIN/ADMIN may delete.
+    Approve-type activities cannot be deleted (audit trail).
+    """
+    act = db.get(FileActivity, activity_id)
+    if not act:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    if act.activity_type == "approve":
+        raise HTTPException(status_code=400, detail="审批记录不可删除")
+    if act.user_id != user_id and not _is_privileged_role(roles):
+        raise HTTPException(status_code=403, detail="无权删除此记录")
+    db.delete(act)
+    db.commit()
 
 
 def update_file_content(db: Session, file_id: int, file: UploadFile,

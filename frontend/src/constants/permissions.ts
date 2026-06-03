@@ -18,19 +18,19 @@ export const PERMISSION_CATEGORY_META: Record<
 }
 
 export const PERMISSIONS: Permission[] = [
-    { id: 1, name: 'doc:create', description: '创建目录、上传文件与新增文档', category: 'document' },
-    { id: 2, name: 'doc:read', description: '查看文件列表、打开与下载文档', category: 'document' },
-    { id: 3, name: 'doc:update', description: '编辑文档信息、重命名文件或目录', category: 'document' },
-    { id: 4, name: 'doc:delete', description: '删除文件、目录与文档内容', category: 'document' },
+    { id: 1, name: 'doc:create', description: '创建目录、上传文件', category: 'document' },
+    { id: 2, name: 'doc:read', description: '查看文件列表、预览与下载文档', category: 'document' },
+    { id: 3, name: 'doc:update', description: '重命名文件或目录、更新文件内容', category: 'document' },
+    { id: 4, name: 'doc:delete', description: '删除文件与目录', category: 'document' },
     { id: 5, name: 'doc:review', description: '提交或处理文档审阅', category: 'document' },
     { id: 6, name: 'doc:approve', description: '审批文档流转结果', category: 'document' },
     { id: 7, name: 'doc:comment', description: '评论文档并添加批注', category: 'document' },
     { id: 8, name: 'doc:share', description: '向用户或角色共享文档', category: 'document' },
-    { id: 9, name: 'doc:export', description: '导出文档或文档数据', category: 'document' },
+    { id: 9, name: 'doc:export', description: '下载文档文件', category: 'document' },
     { id: 10, name: 'user:read', description: '查看用户资料与用户列表', category: 'user' },
     { id: 11, name: 'user:create', description: '创建新用户账号', category: 'user' },
-    { id: 12, name: 'user:update', description: '修改用户资料、状态或基础信息', category: 'user' },
-    { id: 13, name: 'user:delete', description: '删除或停用用户账号', category: 'user' },
+    { id: 12, name: 'user:update', description: '启用或禁用用户账号', category: 'user' },
+    { id: 13, name: 'user:delete', description: '删除用户账号', category: 'user' },
     { id: 14, name: 'role:read', description: '查看角色、角色层级与权限配置', category: 'role' },
     { id: 15, name: 'role:create', description: '创建新角色', category: 'role' },
     { id: 16, name: 'role:update', description: '更新角色名称、说明或基础信息', category: 'role' },
@@ -45,6 +45,9 @@ export const PERMISSIONS: Permission[] = [
 
 const DISPLAY_OVERRIDES: Record<string, string> = {
     'file:permission:manage': '文件授权',
+    'doc:update': '更新文档',
+    'doc:export': '下载文档',
+    'user:update': '启用用户',
 }
 
 const RESOURCE_LABELS: Record<string, string> = {

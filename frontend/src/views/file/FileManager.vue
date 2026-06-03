@@ -13,12 +13,14 @@
         </div>
         <div class="hero-actions">
           <el-button
+            v-if="userStore.hasPermission('doc:create')"
             type="primary"
             @click="openCreateDialog()"
           >
             新建目录
           </el-button>
           <el-button
+            v-if="userStore.hasPermission('doc:create')"
             type="success"
             @click="triggerFileUpload"
           >
@@ -167,6 +169,7 @@
                       更新
                     </el-button>
                     <el-button
+                      v-if="userStore.hasPermission('doc:update')"
                       link
                       @click.stop="openRenameDialog({ id: row.id, label: row.fileName })"
                     >
@@ -383,10 +386,15 @@ async function submitCreateDirectory() {
     return
   }
 
-  await createDirectory(name, dialogs.create.parentId)
-  dialogs.create.visible = false
-  dialogs.create.name = ''
-  ElMessage.success('目录已创建')
+  try {
+    await createDirectory(name, dialogs.create.parentId)
+    dialogs.create.visible = false
+    dialogs.create.name = ''
+    ElMessage.success('目录已创建')
+  } catch {
+    ElMessage.error('创建目录失败')
+    return
+  }
 
   if (dialogs.create.jumpToRootAfterSubmit) {
     await fileStore.resetToRoot()

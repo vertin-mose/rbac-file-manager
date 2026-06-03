@@ -41,17 +41,11 @@
     <!-- Share form -->
     <div class="share-section">
       <h4>添加共享</h4>
+      <p class="share-hint">共享后用户可查看此文件及子目录内容。</p>
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="选择用户">
           <el-select v-model="form.userIds" multiple filterable style="width: 100%" placeholder="请选择用户">
             <el-option v-for="u in availableUsers" :key="u.id" :label="u.username" :value="u.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="权限类型">
-          <el-select v-model="form.permissionType" style="width: 100%">
-            <el-option label="查看" value="read" />
-            <el-option label="编辑" value="write" />
-            <el-option label="删除" value="delete" />
           </el-select>
         </el-form-item>
         <el-button type="primary" @click="handleShare" :disabled="form.userIds.length === 0" :loading="sharing">
@@ -92,7 +86,6 @@ const allUsers = ref<UserBasic[]>([])
 
 const form = reactive({
   userIds: [] as number[],
-  permissionType: 'read',
 })
 
 function permLabel(type: string): string {
@@ -149,7 +142,6 @@ async function handleShare() {
   try {
     const res: any = await shareFile(props.fileId, {
       userIds: form.userIds,
-      permissionType: form.permissionType,
     })
     const data = res.data || res
     const granted = data?.granted || []
@@ -167,7 +159,6 @@ async function handleShare() {
     }
 
     form.userIds = []
-    form.permissionType = 'read'
     await loadPermissions()
   } catch {
     ElMessage.error('共享失败')
@@ -199,7 +190,6 @@ watch(
       loadPermissions()
       loadUsers()
       form.userIds = []
-      form.permissionType = 'read'
     }
   },
 )

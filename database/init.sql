@@ -116,6 +116,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     deleted BOOLEAN NOT NULL DEFAULT FALSE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- File activities (review/approve/comment history per file version)
+CREATE TABLE IF NOT EXISTS file_activities (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    file_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    activity_type VARCHAR(20) NOT NULL COMMENT 'review, approve, comment',
+    content VARCHAR(500),
+    approved BOOLEAN COMMENT 'only for approve type',
+    is_history BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'true if from a previous file version',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (file_id) REFERENCES file_records(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Indexes
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_roles_name ON roles(name);
@@ -126,3 +140,16 @@ CREATE INDEX idx_file_records_owner ON file_records(owner_id);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
+CREATE INDEX idx_file_activities_file ON file_activities(file_id);
+CREATE INDEX idx_file_activities_type ON file_activities(activity_type);
+
+-- ========================================
+-- Migration: Review Workflow columns (v2)
+-- Run these ALTER TABLE statements if upgrading from v1 schema
+-- ========================================
+-- ALTER TABLE file_records ADD COLUMN status VARCHAR(20) DEFAULT 'draft';
+-- ALTER TABLE file_records ADD COLUMN review_comment VARCHAR(500);
+-- ALTER TABLE file_records ADD COLUMN reviewed_by BIGINT;
+-- ALTER TABLE file_records ADD COLUMN reviewed_at DATETIME;
+-- ALTER TABLE file_records ADD FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL;
+

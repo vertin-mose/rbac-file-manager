@@ -43,6 +43,10 @@ export const PERMISSIONS: Permission[] = [
     { id: 23, name: 'file:permission:manage', description: '管理文件用户权限', category: 'file' },
 ]
 
+const DISPLAY_OVERRIDES: Record<string, string> = {
+    'file:permission:manage': '文件授权',
+}
+
 const RESOURCE_LABELS: Record<string, string> = {
     doc: '文档',
     user: '用户',
@@ -92,7 +96,7 @@ export function resolvePermission(permission: Permission | string): PermissionMe
     const categoryMeta = PERMISSION_CATEGORY_META[category] || PERMISSION_CATEGORY_META.system
     const resourceLabel = RESOURCE_LABELS[resource] || resource || '权限'
     const actionLabel = ACTION_LABELS[action] || action || '访问'
-    const displayName = resource && action ? `${actionLabel}${resourceLabel}` : name
+    const displayName = DISPLAY_OVERRIDES[name] || (resource && action ? `${actionLabel}${resourceLabel}` : name)
 
     return {
         id: typeof permission === 'string' ? known?.id ?? 0 : permission.id,

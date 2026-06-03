@@ -107,3 +107,21 @@ export async function listUsers(): Promise<UserBasic[]> {
     const res: any = await request.get('/users')
     return res.data || []
 }
+
+export function adminCreateUser(data: {
+    username: string
+    password: string
+    display_name?: string
+    email?: string
+    role_ids?: number[]
+}) {
+    return request.post('/users', data)
+}
+
+export function toggleUserStatus(userId: number) {
+    return request.put(`/users/${userId}/status`)
+}
+
+export function adminDeleteUser(userId: number) {
+    return request.delete(`/users/${userId}`)
+}

@@ -11,15 +11,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from auth import get_current_user
 from config import settings
-from models import ApiResponse
+from models import ApiResponse, Base
 from services import (
-    assign_permissions, assign_user_roles, batch_delete_audit_logs, can_manage_file_permissions,
-    create_directory, create_role, delete_audit_log, delete_file, delete_file_permission, delete_role,
-    ensure_missing_permissions, export_audit_logs, get_effective_permissions, get_file,
-    get_file_content, get_file_permissions, get_hierarchy, get_role, get_user_info, list_files,
-    list_roles, list_users, login, query_audit_logs, record_audit, register, rename_file,
-    review_file, approve_file,
-    set_file_permissions, share_file, update_role, upload_file,
+    admin_create_user, admin_delete_user, assign_permissions, assign_user_roles,
+    batch_delete_audit_logs, can_manage_file_permissions,
+    comment_file, create_directory, create_role, delete_audit_log, delete_file,
+    delete_file_permission, delete_role,
+    ensure_missing_columns, ensure_missing_permissions, export_audit_logs, get_effective_permissions,
+    get_file, get_file_activities, get_file_content, get_file_permissions, get_hierarchy, get_role, get_user_info,
+    list_files, list_roles, list_users, login, query_audit_logs, record_audit, register,
+    rename_file, review_file, approve_file,
+    set_file_permissions, share_file, toggle_user_status, update_file_content, update_role, upload_file,
 )
 
 # ── Database ───────────────────────────────────────────────────────────────
@@ -40,8 +42,10 @@ def get_db():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        ensure_missing_columns(db)
         ensure_missing_permissions(db)
     finally:
         db.close()
@@ -196,6 +200,41 @@ def api_get_user(user_id: int, request: Request, db: Session = Depends(get_db),
     return ApiResponse.success(get_user_info(db, user_id))
 
 
+@app.post("/api/users")
+def api_admin_create_user(data: dict, request: Request, db: Session = Depends(get_db),
+                           _=Depends(require_perm("user:create"))):
+    result = admin_create_user(db, data["username"], data["password"],
+                                data.get("display_name"), data.get("email"),
+                                data.get("role_ids"))
+    record_audit(db, request.state.user_id, request.state.username, "CREATE_USER",
+                 detail=f"管理员创建了用户 {result['username']}")
+    return ApiResponse.success(result, message="User created")
+
+
+@app.put("/api/users/{user_id}/status")
+def api_toggle_user_status(user_id: int, request: Request,
+                            db: Session = Depends(get_db),
+                            _=Depends(require_perm("user:update"))):
+    result = toggle_user_status(db, user_id)
+    status_text = "启用" if result["enabled"] else "禁用"
+    record_audit(db, request.state.user_id, request.state.username, "TOGGLE_USER_STATUS",
+                 detail=f"{status_text}了用户 {result['username']}")
+    return ApiResponse.success(result, message=f"User {status_text}")
+
+
+@app.delete("/api/users/{user_id}")
+def api_admin_delete_user(user_id: int, request: Request,
+                           db: Session = Depends(get_db),
+                           _=Depends(require_perm("user:delete"))):
+    from models import User
+    user = db.get(User, user_id)
+    username = user.username if user else str(user_id)
+    admin_delete_user(db, user_id)
+    record_audit(db, request.state.user_id, request.state.username, "DELETE_USER",
+                 detail=f"删除了用户 {username}")
+    return ApiResponse.success(message="User deleted")
+
+
 # ── File Routes ────────────────────────────────────────────────────────────
 
 @app.get("/api/files")
@@ -334,9 +373,31 @@ async def api_comment_file(file_id: int, data: dict, request: Request,
     await require_perm("doc:comment")(request, db)
     from models import FileRecord
     f = db.get(FileRecord, file_id)
+    result = comment_file(db, file_id, request.state.user_id, data.get("content", ""))
     record_audit(db, request.state.user_id, request.state.username, "COMMENT_FILE",
                  detail=f"评论了文件{f.file_name if f else file_id}：{data.get('content','')[:50]}")
-    return ApiResponse.success(message="Comment added")
+    return ApiResponse.success(result, message="Comment added")
+
+
+@app.put("/api/files/{file_id}/content")
+async def api_update_file_content(file_id: int, request: Request,
+                                   file: UploadFile = File(...),
+                                   db: Session = Depends(get_db)):
+    await get_current_user(request)
+    result = update_file_content(db, file_id, file,
+                                  request.state.user_id, request.state.roles)
+    from models import FileRecord
+    f = db.get(FileRecord, file_id)
+    record_audit(db, request.state.user_id, request.state.username, "UPDATE_FILE",
+                 detail=f"更新了文件{f.file_name if f else file_id}的内容")
+    return ApiResponse.success(result, message="File updated")
+
+
+@app.get("/api/files/{file_id}/activities")
+async def api_get_file_activities(file_id: int, request: Request,
+                                  db: Session = Depends(get_db)):
+    await get_current_user(request)
+    return ApiResponse.success(get_file_activities(db, file_id))
 
 
 # ── Audit Routes ───────────────────────────────────────────────────────────

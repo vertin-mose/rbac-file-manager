@@ -47,6 +47,14 @@ export function uploadFile(file: File, parentId: number) {
     })
 }
 
+export function updateFile(fileId: number, file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.put(`/files/${fileId}/content`, formData, {
+        headers: { 'Content-Type': undefined },
+    })
+}
+
 export function createDirectory(name: string, parentId: number = 0) {
     return request.post('/files/directory', { file_name: name, parent_id: parentId })
 }
@@ -70,12 +78,43 @@ export function reviewFile(id: number, content: string) {
     return request.post(`/files/${id}/review`, { content })
 }
 
-export function approveFile(id: number, content: string) {
-    return request.post(`/files/${id}/approve`, { content })
+export function approveFile(id: number, content: string, approved: boolean = true) {
+    return request.post(`/files/${id}/approve`, { content, approved })
 }
 
 export function commentFile(id: number, content: string) {
     return request.post(`/files/${id}/comment`, { content })
+}
+
+export interface FileActivityItem {
+    id: number
+    fileId: number
+    userId: number
+    username: string
+    activityType: string
+    content: string
+    approved: boolean | null
+    isHistory: boolean
+    createdAt: string | null
+}
+
+function mapActivityItem(item: any): FileActivityItem {
+    return {
+        id: item.id,
+        fileId: item.file_id,
+        userId: item.user_id,
+        username: item.username,
+        activityType: item.activity_type,
+        content: item.content || '',
+        approved: item.approved ?? null,
+        isHistory: item.is_history,
+        createdAt: item.created_at ?? null,
+    }
+}
+
+export async function getFileActivities(fileId: number): Promise<FileActivityItem[]> {
+    const res: any = await request.get(`/files/${fileId}/activities`)
+    return (res.data || []).map(mapActivityItem)
 }
 
 export async function downloadFile(id: number): Promise<Blob> {

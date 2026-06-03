@@ -95,69 +95,60 @@
           <div class="table-header">
             <div>
               <h2>角色层级</h2>
-              <p>只读展示后端配置的继承关系。</p>
+              <p>只读展示 L1-L5 层级继承关系。</p>
             </div>
           </div>
         </template>
 
-        <el-timeline>
-          <el-timeline-item
-            v-for="item in hierarchy"
-            :key="`${item.roleId}-${item.inheritedRoleId}`"
-            type="primary"
-          >
-            <strong>{{ item.roleName }}</strong>
-            继承
-            <strong>{{ item.inheritedRoleName }}</strong>
-          </el-timeline-item>
-        </el-timeline>
-
-        <el-divider />
-
-        <div class="assign-box">
-          <div class="assign-header">
-            <h3>用户角色分配</h3>
-            <p>输入用户 ID 查询用户信息后，选择角色并确认分配。</p>
+        <div class="hierarchy-tree">
+          <div class="h-level l1">
+            <div class="level-badge">L1</div>
+            <div class="level-card super-admin">
+              <strong>SUPER_ADMIN</strong>
+              <span class="level-desc">超级管理员</span>
+            </div>
           </div>
-          <el-form label-position="top">
-            <el-form-item label="用户 ID">
-              <el-input-number v-model="assignForm.userId" :min="1" controls-position="right" @change="handleUserIdChange" />
-            </el-form-item>
-
-            <!-- Show matched user info -->
-            <el-alert
-              v-if="userInfo"
-              :title="userInfo.username"
-              :description="formatUserInfoDescription(userInfo)"
-              type="success"
-              show-icon
-              :closable="false"
-              class="user-info-alert"
-            />
-            <el-alert
-              v-if="userInfoError"
-              :title="userInfoError"
-              type="error"
-              show-icon
-              :closable="false"
-              class="user-info-alert"
-            />
-            <div v-if="userInfoLoading" class="user-info-loading">查询中...</div>
-
-            <el-form-item label="角色">
-              <el-select v-model="assignForm.roleIds" multiple filterable style="width: 100%">
-                <el-option v-for="role in roles" :key="role.id" :label="role.name" :value="role.id" />
-              </el-select>
-            </el-form-item>
-            <el-button
-              v-if="userStore.hasPermission('role:assign')"
-              type="primary"
-              @click="confirmAssignRoles"
-              :disabled="!userInfo"
-            >
-              保存分配
-            </el-button>
-          </el-form>
+          <div class="h-arrow">▼ 继承</div>
+          <div class="h-level l2">
+            <div class="level-badge">L2</div>
+            <div class="level-card admin">
+              <strong>ADMIN</strong>
+              <span class="level-desc">系统管理员</span>
+            </div>
+          </div>
+          <div class="h-arrow">▼ 继承</div>
+          <div class="h-level l3">
+            <div class="level-badge">L3</div>
+            <div class="level-card manager">
+              <strong>MANAGER</strong>
+              <span class="level-desc">部门经理</span>
+            </div>
+          </div>
+          <div class="h-arrow">▼ 继承</div>
+          <div class="h-branch">
+            <div class="h-level l4">
+              <div class="level-badge">L4</div>
+              <div class="level-card editor">
+                <strong>EDITOR</strong>
+                <span class="level-desc">文档编辑员</span>
+              </div>
+            </div>
+            <div class="h-level l4">
+              <div class="level-badge">L4</div>
+              <div class="level-card reviewer">
+                <strong>REVIEWER</strong>
+                <span class="level-desc">文档审核员</span>
+              </div>
+            </div>
+          </div>
+          <div class="h-arrow l4-arrow">▼ 继承</div>
+          <div class="h-level l5">
+            <div class="level-badge">L5</div>
+            <div class="level-card viewer">
+              <strong>VIEWER</strong>
+              <span class="level-desc">外部访客</span>
+            </div>
+          </div>
         </div>
       </el-card>
     </div>
@@ -195,19 +186,30 @@
     </el-dialog>
 
     <el-dialog v-model="permissionDialog.visible" title="权限配置" width="640px">
+      <div style="margin-bottom: 12px; color: #909399; font-size: 13px">
+        直接权限（可勾选）— 继承权限（已勾选，不可修改，来自下级角色的层级继承）
+      </div>
       <el-checkbox-group v-model="permissionDialog.permissionIds" class="permission-grid">
         <div v-for="group in permissionGroups" :key="group" class="permission-group">
           <h4>{{ categoryLabel(group) }}</h4>
-          <el-checkbox
-            v-for="permission in permissionsByGroup[group]"
-            :key="permission.id"
-            :label="permission.id"
-          >
-            <span class="permission-option">
-              <span>{{ permissionDisplayName(permission) }}</span>
-              <small>{{ permission.description }}</small>
-            </span>
-          </el-checkbox>
+          <div v-for="permission in permissionsByGroup[group]" :key="permission.id" class="permission-check-item">
+            <el-checkbox
+              :label="permission.id"
+              :disabled="permissionDialog.inheritedPermissionIds.includes(permission.id)"
+              :class="{ 'is-inherited': permissionDialog.inheritedPermissionIds.includes(permission.id) }"
+            >
+              <span class="permission-option">
+                <span>{{ permissionDisplayName(permission) }}</span>
+                <small>{{ permission.description }}</small>
+              </span>
+            </el-checkbox>
+            <el-tag
+              v-if="permissionDialog.inheritedPermissionIds.includes(permission.id)"
+              size="small"
+              type="info"
+              effect="plain"
+            >继承</el-tag>
+          </div>
         </div>
       </el-checkbox-group>
       <template #footer>
@@ -222,23 +224,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
-import { assignPermissions, assignUserRoles, createRole, deleteRole, getRoleHierarchy, getRoles, getUserInfo, updateRole, type Permission, type Role, type RoleHierarchyItem } from '@/api/role'
+import { assignPermissions, createRole, deleteRole, getRoles, updateRole, type Permission, type Role } from '@/api/role'
 import { PERMISSIONS, PERMISSION_GROUPS, permissionCategoryLabel, permissionDescription, permissionDisplayName, permissionTagType } from '@/constants/permissions'
 import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
 const loading = ref(false)
 const roles = ref<Role[]>([])
-const hierarchy = ref<RoleHierarchyItem[]>([])
-
-const userInfo = ref<any>(null)
-const userInfoLoading = ref(false)
-const userInfoError = ref('')
-
-const assignForm = reactive({
-  userId: 0,
-  roleIds: [] as number[],
-})
 
 const roleDialog = reactive({
   visible: false,
@@ -254,6 +246,7 @@ const permissionDialog = reactive({
   visible: false,
   roleId: 0,
   permissionIds: [] as number[],
+  inheritedPermissionIds: [] as number[],
 })
 
 const permissionGroups = [...PERMISSION_GROUPS]
@@ -291,24 +284,10 @@ function hasAnyPermissions(role: Role) {
   return directPermissions(role).length > 0 || inheritedPermissions(role).length > 0
 }
 
-function formatUserInfoDescription(info: {
-  display_name?: string | null
-  email?: string | null
-  roles?: Array<{ name: string }>
-}) {
-  const roleNames = info.roles?.map((role) => role.name).join(', ') || '无'
-  return `显示名: ${info.display_name || '--'} | 邮箱: ${info.email || '--'} | 当前角色: ${roleNames}`
-}
-
 async function loadData() {
   loading.value = true
   try {
-    const [roleList, hierarchyList] = await Promise.all([
-      getRoles(),
-      getRoleHierarchy(),
-    ])
-    roles.value = roleList
-    hierarchy.value = hierarchyList
+    roles.value = await getRoles()
   } finally {
     loading.value = false
   }
@@ -356,6 +335,10 @@ function openPermissionDialog(role: Role) {
   permissionDialog.visible = true
   permissionDialog.roleId = role.id
   permissionDialog.permissionIds = role.permissions.map((permission) => permission.id)
+  const directIds = new Set(role.permissions.map((p) => p.id))
+  permissionDialog.inheritedPermissionIds = role.inheritedPermissions
+    .filter((p) => !directIds.has(p.id))
+    .map((p) => p.id)
 }
 
 async function submitPermissionDialog() {
@@ -372,44 +355,6 @@ async function confirmDelete(roleId: number, roleName: string) {
   await deleteRole(roleId)
   ElMessage.success('角色已删除')
   await loadData()
-}
-
-async function handleUserIdChange() {
-  if (!assignForm.userId || assignForm.userId < 1) {
-    userInfo.value = null
-    userInfoError.value = ''
-    return
-  }
-  userInfoLoading.value = true
-  userInfo.value = null
-  userInfoError.value = ''
-  try {
-    userInfo.value = await getUserInfo(assignForm.userId)
-  } catch {
-    userInfoError.value = '未找到该用户'
-  } finally {
-    userInfoLoading.value = false
-  }
-}
-
-async function confirmAssignRoles() {
-  if (!assignForm.userId || assignForm.roleIds.length === 0) {
-    ElMessage.warning('请填写用户 ID 并选择角色')
-    return
-  }
-  if (!userInfo.value) {
-    ElMessage.warning('请先查询确认用户信息')
-    return
-  }
-  const currentRoles = userInfo.value.roles.map((r: any) => r.name).join(', ') || '无'
-  const newRoles = assignForm.roleIds.map((id: number) => roles.value.find(r => r.id === id)?.name || id).join(', ')
-  await ElMessageBox.confirm(
-    `将用户 "${userInfo.value.username}"（ID: ${assignForm.userId}）的角色从 [${currentRoles}] 变更为 [${newRoles}]，确认？`,
-    '角色分配确认',
-    { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' }
-  )
-  await assignUserRoles(assignForm.userId, assignForm.roleIds)
-  ElMessage.success('用户角色已更新')
 }
 
 onMounted(loadData)
@@ -475,13 +420,11 @@ onMounted(loadData)
   gap: 16px;
 }
 
-.table-header h2,
-.assign-header h3 {
+.table-header h2 {
   margin: 0;
 }
 
-.table-header p,
-.assign-header p {
+.table-header p {
   margin: 6px 0 0;
   color: #7c8b99;
 }
@@ -513,21 +456,6 @@ onMounted(loadData)
   font-weight: 700;
 }
 
-.assign-box {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.user-info-alert {
-  margin-bottom: 8px;
-}
-
-.user-info-loading {
-  color: #909399;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
 
 .permission-grid {
   width: 100%;
@@ -563,6 +491,60 @@ onMounted(loadData)
   color: #81909f;
   font-size: 12px;
 }
+
+.permission-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.permission-check-item :deep(.is-inherited .el-checkbox__label) {
+  color: #a0abb5;
+}
+
+/* ── Role Hierarchy Tree ──────────────────────────── */
+.hierarchy-tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.h-level {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.level-badge {
+  min-width: 32px; height: 24px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.l1 .level-badge { background: #e74c3c; }
+.l2 .level-badge { background: #e67e22; }
+.l3 .level-badge { background: #2980b9; }
+.l4 .level-badge { background: #27ae60; }
+.l5 .level-badge { background: #95a5a6; }
+.level-card {
+  flex: 1; padding: 10px 14px; border-radius: 8px;
+  border: 1px solid #e1e9f0; display: flex; flex-direction: column; gap: 2px;
+}
+.level-card strong { font-size: 14px; }
+.level-desc { font-size: 12px; color: #7c8b99; }
+.super-admin { background: #fdf0ef; border-color: #f5c6cb; }
+.admin { background: #fef6ef; border-color: #f8d7a8; }
+.manager { background: #eef4fa; border-color: #b8d4f0; }
+.editor { background: #eef8f0; border-color: #a8dfb4; }
+.reviewer { background: #eef8f0; border-color: #a8dfb4; }
+.viewer { background: #f8f9fa; border-color: #d5d8dc; }
+.h-arrow { font-size: 11px; color: #95a5a6; text-align: center; line-height: 1.2; }
+.h-branch {
+  display: flex; flex-direction: column; gap: 6px;
+  width: 100%; padding-left: 42px; border-left: 2px solid #d5d8dc;
+}
+.l4-arrow { padding-left: 42px; }
 
 @media (max-width: 1120px) {
   .page-hero {

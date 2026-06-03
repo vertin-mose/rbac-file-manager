@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from auth import create_token, hash_password, verify_password
 from config import settings
 from models import (
-    AuditLog, FilePermission, FileRecord, Permission, Role, RoleHierarchy, RolePermission, User, UserRole,
+    AuditLog, FileActivity, FilePermission, FileRecord, Permission, Role, RoleHierarchy, RolePermission, User, UserRole,
 )
 
 
@@ -294,6 +294,50 @@ def assign_user_roles(db: Session, user_id: int, role_ids: list[int]):
         raise HTTPException(status_code=404, detail="User not found")
     roles = db.query(Role).filter(Role.id.in_(role_ids), Role.deleted == False).all()
     user.roles = roles
+    db.commit()
+
+
+def admin_create_user(db: Session, username: str, password: str,
+                       display_name: str = None, email: str = None,
+                       role_ids: list[int] = None) -> dict:
+    """Create user with role selection — admin only."""
+    exists = db.query(User).filter(User.username == username, User.deleted == False).first()
+    if exists:
+        raise HTTPException(status_code=409, detail="Username already taken")
+    user = User(username=username, password=hash_password(password),
+                display_name=display_name, email=email)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    if role_ids:
+        roles = db.query(Role).filter(Role.id.in_(role_ids), Role.deleted == False).all()
+        user.roles = roles
+        db.commit()
+    return {
+        "id": user.id, "username": user.username,
+        "display_name": user.display_name, "email": user.email,
+        "roles": [{"id": r.id, "name": r.name} for r in (user.roles or [])],
+    }
+
+
+def toggle_user_status(db: Session, user_id: int) -> dict:
+    """Toggle user enabled/disabled."""
+    user = db.get(User, user_id)
+    if not user or user.deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.enabled = not user.enabled
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username, "enabled": user.enabled}
+
+
+def admin_delete_user(db: Session, user_id: int):
+    """Soft delete a user."""
+    user = db.get(User, user_id)
+    if not user or user.deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.deleted = True
+    user.roles = []
     db.commit()
 
 
@@ -576,17 +620,24 @@ def review_file(db: Session, file_id: int, reviewer_id: int, comment: str = "") 
     f.reviewed_at = dt.now()
     db.commit()
     db.refresh(f)
+    create_activity(db, file_id, reviewer_id, "review", comment)
     return _file_to_dict(f)
 
 
 def approve_file(db: Session, file_id: int, approver_id: int,
                  approved: bool = True, comment: str = "") -> dict:
-    """Approve or reject a file — sets status to 'approved' or 'rejected'."""
+    """Approve or reject a file — sets status to 'approved' or 'rejected'.
+
+    One-time only: raises 400 if file is already approved/rejected.
+    After update_file_content (status reset to draft), approval can be submitted again.
+    """
     f = db.get(FileRecord, file_id)
     if not f or f.deleted:
         raise HTTPException(status_code=404, detail="File not found")
     if f.is_directory:
         raise HTTPException(status_code=400, detail="Directories cannot be approved")
+    if f.status in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="该文件已完成审批，更新文件后可再次提交审批")
     from datetime import datetime as dt
     f.status = "approved" if approved else "rejected"
     f.review_comment = comment or ""
@@ -594,7 +645,19 @@ def approve_file(db: Session, file_id: int, approver_id: int,
     f.reviewed_at = dt.now()
     db.commit()
     db.refresh(f)
+    create_activity(db, file_id, approver_id, "approve", comment, approved)
     return _file_to_dict(f)
+
+def comment_file(db: Session, file_id: int, user_id: int, content: str = "") -> dict:
+    """Add a comment to a file."""
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    if f.is_directory:
+        raise HTTPException(status_code=400, detail="Directories cannot be commented on")
+    create_activity(db, file_id, user_id, "comment", content)
+    return _file_to_dict(f)
+
 
 def get_file_permissions(db: Session, file_id: int) -> list[dict]:
     f = db.get(FileRecord, file_id)
@@ -665,6 +728,98 @@ def can_manage_file_permissions(db: Session, file_id: int, user_id: int, roles: 
     return False
 
 
+# ── File Activity Service ───────────────────────────────────────────────
+
+def create_activity(db: Session, file_id: int, user_id: int,
+                    activity_type: str, content: str = "",
+                    approved: bool = None):
+    """Create a FileActivity record for the current version."""
+    activity = FileActivity(
+        file_id=file_id, user_id=user_id,
+        activity_type=activity_type, content=content or "",
+        approved=approved, is_history=False,
+    )
+    db.add(activity)
+    db.commit()
+
+
+def get_file_activities(db: Session, file_id: int) -> list[dict]:
+    """Return all activities for a file, newest first."""
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    activities = db.query(FileActivity).filter(
+        FileActivity.file_id == file_id
+    ).order_by(desc(FileActivity.created_at)).all()
+    result = []
+    for act in activities:
+        user = db.get(User, act.user_id)
+        result.append({
+            "id": act.id,
+            "file_id": act.file_id,
+            "user_id": act.user_id,
+            "username": user.username if user and not user.deleted else "已删除用户",
+            "activity_type": act.activity_type,
+            "content": act.content,
+            "approved": act.approved,
+            "is_history": act.is_history,
+            "created_at": act.created_at.isoformat() if act.created_at else None,
+        })
+    return result
+
+
+def update_file_content(db: Session, file_id: int, file: UploadFile,
+                         user_id: int, roles: list[str]) -> dict:
+    """Overwrite file content, reset status to draft, mark old activities as history."""
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    if f.is_directory:
+        raise HTTPException(status_code=400, detail="Cannot update a directory")
+    if not _check_file_permission(db, file_id, user_id, roles, "write"):
+        raise HTTPException(status_code=403, detail="No permission to update this file")
+
+    # Read new content
+    content = file.file.read()
+    ext = file.filename.rsplit(".", 1)[-1] if "." in (file.filename or "") else ""
+    storage_name = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+
+    # Replace storage
+    minio_client = get_minio_client()
+    if minio_client:
+        minio_client.put_object(settings.MINIO_BUCKET, storage_name,
+                                io.BytesIO(content), len(content))
+        f.storage_url = f"{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{storage_name}"
+    else:
+        local_dir = os.path.join(os.path.dirname(__file__), "storage")
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, storage_name)
+        with open(local_path, "wb") as fh:
+            fh.write(content)
+        f.storage_url = f"local://{storage_name}"
+
+    # Update metadata
+    f.size = len(content)
+    f.mime_type = file.content_type
+    f.file_name = file.filename or f.file_name
+
+    # Reset status to draft
+    f.status = "draft"
+    f.review_comment = None
+    f.reviewed_by = None
+    f.reviewed_at = None
+
+    # Mark all current activities as history
+    db.query(FileActivity).filter(
+        FileActivity.file_id == file_id,
+        FileActivity.is_history == False,
+    ).update({"is_history": True}, synchronize_session=False)
+
+    db.commit()
+    db.refresh(f)
+    return _file_to_dict(f)
+
+
 def ensure_missing_permissions(db: Session):
     """Ensure file:permission:manage exists and is assigned to ADMIN role.
     Safe to call on every startup — skips if already seeded.
@@ -684,6 +839,23 @@ def ensure_missing_permissions(db: Session):
     if admin_role and perm not in admin_role.permissions:
         admin_role.permissions.append(perm)
         db.commit()
+
+
+def ensure_missing_columns(db: Session):
+    """Auto-add missing columns to existing DB tables (safe no-op if already present)."""
+    from sqlalchemy import text, inspect
+    inspector = inspect(db.bind)
+    existing_cols = {c["name"] for c in inspector.get_columns("file_records")}
+    migrations = [
+        ("status", "VARCHAR(20) DEFAULT 'draft'"),
+        ("review_comment", "VARCHAR(500)"),
+        ("reviewed_by", "BIGINT"),
+        ("reviewed_at", "DATETIME"),
+    ]
+    for col_name, col_def in migrations:
+        if col_name not in existing_cols:
+            db.execute(text(f"ALTER TABLE file_records ADD COLUMN {col_name} {col_def}"))
+    db.commit()
 
 
 # ── Audit Service ──────────────────────────────────────────────────────────

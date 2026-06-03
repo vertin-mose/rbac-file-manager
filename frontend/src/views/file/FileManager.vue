@@ -30,6 +30,12 @@
             style="display: none"
             @change="handleFileInputChange"
           />
+          <input
+            ref="updateInputRef"
+            type="file"
+            style="display: none"
+            @change="handleUpdateInputChange"
+          />
           <el-button :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
         </div>
       </section>
@@ -143,6 +149,22 @@
                       @click.stop="handleViewFile(row)"
                     >
                       查看
+                    </el-button>
+                    <el-button
+                      v-if="!row.isDirectory"
+                      link
+                      type="primary"
+                      @click.stop="handleDownloadFile(row)"
+                    >
+                      下载
+                    </el-button>
+                    <el-button
+                      v-if="!row.isDirectory && userStore.hasPermission('doc:update')"
+                      link
+                      type="primary"
+                      @click.stop="handleUpdateFile(row)"
+                    >
+                      更新
                     </el-button>
                     <el-button
                       link
@@ -266,41 +288,32 @@
       @updated="refreshAll"
     />
 
-    <el-dialog v-model="dialogs.action.visible" :title="actionDialogTitle" width="500px">
-      <el-form label-position="top">
-        <el-form-item label="说明">
-          <el-input
-            v-model="dialogs.action.content"
-            type="textarea"
-            :rows="4"
-            :placeholder="dialogs.action.mode === 'comment' ? '请输入评论内容' : '请输入处理说明'"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogs.action.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitAction">提交</el-button>
-      </template>
-    </el-dialog>
+    <FileActivityDialog
+      :visible="dialogs.activity.visible"
+      :file-id="dialogs.activity.fileId"
+      :file-name="dialogs.activity.fileName"
+      :mode="dialogs.activity.mode"
+      @close="dialogs.activity.visible = false"
+      @updated="refreshAll"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Folder } from '@element-plus/icons-vue'
+import FileActivityDialog from '@/components/FileActivityDialog.vue'
 import FileTree from '@/components/FileTree.vue'
 import FilePermissionDialog from '@/components/FilePermissionDialog.vue'
 import ShareDialog from '@/components/ShareDialog.vue'
 import {
-  approveFile,
-  commentFile,
   createDirectory,
   deleteFile,
   downloadFile,
   renameFile,
-  reviewFile,
   shareFile,
+  updateFile,
   uploadFile,
   type FileItem,
 } from '@/api/file'
@@ -308,12 +321,11 @@ import { useFileStore } from '@/store/file'
 import { useUserStore } from '@/store/user'
 import { formatBytes, formatDateTime } from '@/utils/format'
 
-type ActionMode = 'review' | 'approve' | 'comment'
-
 const fileStore = useFileStore()
 const userStore = useUserStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const updateInputRef = ref<HTMLInputElement | null>(null)
 
 const dialogs = reactive({
   create: {
@@ -327,11 +339,11 @@ const dialogs = reactive({
     fileId: 0,
     name: '',
   },
-  action: {
+  activity: {
     visible: false,
-    mode: 'review' as ActionMode,
-    file: null as FileItem | null,
-    content: '',
+    fileId: 0,
+    fileName: '',
+    mode: 'review' as 'review' | 'approve' | 'comment',
   },
   permission: {
     visible: false,
@@ -343,17 +355,6 @@ const dialogs = reactive({
     fileId: 0,
     fileName: '',
   },
-})
-
-const actionDialogTitle = computed(() => {
-  switch (dialogs.action.mode) {
-    case 'review':
-      return '提交审阅'
-    case 'approve':
-      return '审批文件'
-    case 'comment':
-      return '添加评论'
-  }
 })
 
 async function refreshAll() {
@@ -414,11 +415,40 @@ async function submitRename() {
   await refreshAll()
 }
 
-function openActionDialog(mode: ActionMode, file: FileItem) {
-  dialogs.action.visible = true
-  dialogs.action.mode = mode
-  dialogs.action.file = file
-  dialogs.action.content = ''
+function openActionDialog(mode: 'review' | 'approve' | 'comment', file: FileItem) {
+  dialogs.activity.visible = true
+  dialogs.activity.mode = mode
+  dialogs.activity.fileId = file.id
+  dialogs.activity.fileName = file.fileName
+}
+
+function handleUpdateFile(file: FileItem) {
+  if (file.isDirectory) return
+  dialogs.activity.visible = false
+  dialogs.share.visible = false
+  dialogs.permission.visible = false
+  // Store current file and trigger file picker
+  updateTargetFile.value = file
+  updateInputRef.value?.click()
+}
+
+const updateTargetFile = ref<FileItem | null>(null)
+
+async function handleUpdateInputChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !updateTargetFile.value) return
+
+  try {
+    await updateFile(updateTargetFile.value.id, file)
+    ElMessage.success('文件已更新')
+    await refreshAll()
+  } catch {
+    ElMessage.error('更新失败')
+  } finally {
+    input.value = ''
+    updateTargetFile.value = null
+  }
 }
 
 function openPermissionDialog(file: FileItem) {
@@ -443,22 +473,6 @@ function fileTypeLabel(mimeType: string): string {
   if (mimeType.startsWith('text/')) return '文本'
   if (mimeType.includes('zip') || mimeType.includes('compressed')) return '压缩包'
   return mimeType.split('/').pop()?.toUpperCase() || '文件'
-}
-
-async function submitAction() {
-  if (!dialogs.action.file) return
-
-  if (dialogs.action.mode === 'review') {
-    await reviewFile(dialogs.action.file.id, dialogs.action.content)
-  } else if (dialogs.action.mode === 'approve') {
-    await approveFile(dialogs.action.file.id, dialogs.action.content)
-  } else {
-    await commentFile(dialogs.action.file.id, dialogs.action.content)
-  }
-
-  dialogs.action.visible = false
-  ElMessage.success('操作已提交')
-  await refreshAll()
 }
 
 async function confirmDelete(file: FileItem) {
@@ -527,6 +541,24 @@ async function handleViewFile(row: FileItem) {
       const detail = e?.response?.data?.message || e?.response?.data?.detail || ''
       ElMessage.error(detail || '文件无法查看')
     }
+  }
+}
+
+async function handleDownloadFile(row: FileItem) {
+  if (row.isDirectory) return
+  try {
+    const blob = await downloadFile(row.id)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = row.fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (e: any) {
+    const detail = e?.response?.data?.message || e?.response?.data?.detail || ''
+    ElMessage.error(detail || '文件下载失败')
   }
 }
 

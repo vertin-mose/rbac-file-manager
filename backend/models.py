@@ -81,7 +81,8 @@ class FileRecord(Base):
         backref=backref("parent", remote_side=[id]),
         lazy="selectin"
     )
-    owner = relationship("User", lazy="selectin")
+    owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
+    reviewer = relationship("User", foreign_keys=[reviewed_by], lazy="selectin")
 
 
 class FilePermission(Base):
@@ -92,6 +93,22 @@ class FilePermission(Base):
     role_id = Column(BigInteger, ForeignKey("roles.id"))
     permission_type = Column(String(20), nullable=False)
     granted_at = Column(DateTime, default=datetime.now)
+
+
+class FileActivity(Base):
+    """Stores review/approve/comment history per file version."""
+    __tablename__ = "file_activities"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    file_id = Column(BigInteger, ForeignKey("file_records.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    activity_type = Column(String(20), nullable=False, comment="review, approve, comment")
+    content = Column(String(500))
+    approved = Column(Boolean, nullable=True, comment="only for approve type")
+    is_history = Column(Boolean, default=False, comment="true = previous version, false = current version")
+    created_at = Column(DateTime, default=datetime.now)
+
+    file = relationship("FileRecord", foreign_keys=[file_id], lazy="selectin")
+    user = relationship("User", foreign_keys=[user_id], lazy="selectin")
 
 
 class AuditLog(Base):

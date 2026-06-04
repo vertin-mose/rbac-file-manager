@@ -106,8 +106,8 @@
             <div v-if="gidx > 0" class="h-arrow">▼ 继承</div>
             <!-- Roles at this level -->
             <div v-for="role in group.roles" :key="role.id" class="h-level-branch">
-              <div class="h-level" :class="'l' + group.level">
-                <div class="level-badge">L{{ group.level }}</div>
+              <div class="h-level" :class="levelGroupClass(group.level)">
+                <div class="level-badge">{{ levelGroupLabel(group.level) }}</div>
                 <div class="level-card" :class="levelCardClass(role.name)">
                   <strong>{{ role.name }}</strong>
                   <span class="level-desc">{{ role.display_name }}</span>
@@ -164,7 +164,7 @@
             <div v-for="(group, gidx) in hierarchyByLevel" :key="gidx" class="wizard-level-row">
               <div class="wizard-level-header">
                 <el-radio v-model="roleDialog.selectedLevel" :value="group.level">
-                  <span :class="'level-tag l' + group.level">L{{ group.level }}</span>
+                  <span :class="'level-tag ' + levelGroupClass(group.level)">{{ levelGroupLabel(group.level) }}</span>
                   <span class="level-role-names">{{ group.roles.map(r => r.name).join('、') }}</span>
                 </el-radio>
               </div>
@@ -190,7 +190,7 @@
             <el-radio-group v-model="roleDialog.placement" class="placement-radio-group">
               <el-radio value="parallel" border>
                 <div class="placement-option">
-                  <strong>与父角色同级并列</strong>
+                  <strong>与上级角色同级并列</strong>
                   <span class="placement-desc">新角色与所继承的角色位于同一层级</span>
                 </div>
               </el-radio>
@@ -198,10 +198,10 @@
                 <div class="placement-option">
                   <strong>插入层级之间</strong>
                   <span class="placement-desc">
-                    新角色插入到父角色与
+                    新角色插入到上级角色与
                     <template v-if="hasSelectedChildren">【{{ getChildNames() }}】</template>
                     <template v-else>其直接继承者</template>
-                    之间，以下角色依次顺延
+                    之间，新角色单独占用一个层级
                   </span>
                 </div>
               </el-radio>
@@ -308,6 +308,14 @@ const inheritedPermissionIds = ref<Set<number>>(new Set())
 
 function isPermissionInherited(permId: number): boolean {
   return inheritedPermissionIds.value.has(permId)
+}
+
+function levelGroupClass(level: number): string {
+  return 'l' + level
+}
+
+function levelGroupLabel(level: number): string {
+  return `L${level}`
 }
 
 function levelCardClass(name: string): string {
@@ -704,6 +712,13 @@ onMounted(loadData)
 .l3 .level-badge { background: #2980b9; }
 .l4 .level-badge { background: #27ae60; }
 .l5 .level-badge { background: #95a5a6; }
+.l6 .level-badge { background: #8e44ad; }
+.l7 .level-badge { background: #d35400; }
+.l8 .level-badge { background: #16a085; }
+.l9 .level-badge { background: #2c3e50; }
+.l10 .level-badge { background: #7f8c8d; }
+/* Fallback for levels beyond L10 */
+.level-badge { background: #95a5a6; }
 .level-card {
   flex: 1; padding: 10px 14px; border-radius: 8px;
   border: 1px solid #e1e9f0; display: flex; flex-direction: column; gap: 2px;
@@ -763,6 +778,12 @@ onMounted(loadData)
 .level-tag.l3 { background: #2980b9; }
 .level-tag.l4 { background: #27ae60; }
 .level-tag.l5 { background: #95a5a6; }
+.level-tag.l6 { background: #8e44ad; }
+.level-tag.l7 { background: #d35400; }
+.level-tag.l8 { background: #16a085; }
+.level-tag.l9 { background: #2c3e50; }
+.level-tag.l10 { background: #7f8c8d; }
+.level-tag { background: #95a5a6; }
 .level-role-names {
   color: #213547;
   font-weight: 600;

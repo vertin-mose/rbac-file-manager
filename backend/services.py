@@ -310,6 +310,24 @@ def get_hierarchy(db: Session) -> list[dict]:
 def get_hierarchy_structure(db: Session) -> list[dict]:
     """Return all active roles sorted by level with their inherited permissions."""
     roles = db.query(Role).filter(Role.deleted == False).all()
+    role_map = {r.id: r for r in roles}
+
+    # Build parent/child maps from RoleHierarchy directly (bypass ORM cache)
+    from collections import defaultdict
+    parent_map: dict[int, list[int]] = defaultdict(list)   # role_id → [inherited_role_ids]
+    child_map: dict[int, list[int]] = defaultdict(list)    # inherited_role_id → [role_ids]
+    for rh in db.query(RoleHierarchy).all():
+        parent_map[rh.role_id].append(rh.inherited_role_id)
+        child_map[rh.inherited_role_id].append(rh.role_id)
+
+    def get_parent_ids(role_id: int) -> list[int]:
+        return [pid for pid in parent_map.get(role_id, [])
+                if pid in role_map and not role_map[pid].deleted]
+
+    def get_parent_levels(role_id: int) -> list[int]:
+        return [level_map.get(pid) for pid in get_parent_ids(role_id)
+                if level_map.get(pid) is not None]
+
     level_map: dict[int, int] = {}
 
     # Pass 1: roles with hardcoded level or direct inheritance from known roles
@@ -317,10 +335,10 @@ def get_hierarchy_structure(db: Session) -> list[dict]:
         if role.name in ROLE_LEVEL:
             level_map[role.id] = ROLE_LEVEL[role.name]
         else:
-            inherited = [r for r in role.inherited_roles if not r.deleted]
-            if inherited:
-                known = [ROLE_LEVEL.get(r.name) for r in inherited]
-                known = [l for l in known if l is not None]
+            parent_ids = get_parent_ids(role.id)
+            if parent_ids:
+                known = [ROLE_LEVEL.get(role_map[pid].name) for pid in parent_ids
+                         if role_map[pid].name in ROLE_LEVEL]
                 level_map[role.id] = min(known) - 1 if known else None
             else:
                 level_map[role.id] = 99
@@ -331,9 +349,7 @@ def get_hierarchy_structure(db: Session) -> list[dict]:
         changed = False
         for role in roles:
             if level_map.get(role.id) is None:
-                inherited = [r for r in role.inherited_roles if not r.deleted]
-                levels = [level_map.get(r.id) for r in inherited]
-                levels = [l for l in levels if l is not None]
+                levels = get_parent_levels(role.id)
                 if levels:
                     level_map[role.id] = min(levels) - 1
                     changed = True
@@ -343,10 +359,66 @@ def get_hierarchy_structure(db: Session) -> list[dict]:
         if level_map.get(role.id) is None:
             level_map[role.id] = 99
 
+    # Pass 4: detect and correct inserted roles.
+    inserted_ids: set[int] = set()
+    for role in roles:
+        if role.name in ROLE_LEVEL:
+            continue
+        cur = level_map.get(role.id, 99)
+        if cur == 99:
+            continue
+        children_ids = child_map.get(role.id)
+        if not children_ids:
+            continue
+        if not get_parent_ids(role.id):
+            continue
+        # Check if any child is at same or lower level (child >= role).
+        # In a normal hierarchy, children are always above (child_level < role_level).
+        # If child_level >= role_level, the role was inserted between the child
+        # and the child's former parent, squeezing them together.
+        for child_id in children_ids:
+            child_level = level_map.get(child_id)
+            if child_level is not None and child_level >= cur:
+                inserted_ids.add(role.id)
+                break
+
+    # Process inserted roles top-down (lowest L first), cascade each
+    inserted_roles = sorted(
+        [r for r in roles if r.id in inserted_ids],
+        key=lambda r: level_map.get(r.id, 99),
+    )
+    for role in inserted_roles:
+        parent_levels = get_parent_levels(role.id)
+        if not parent_levels:
+            continue
+        new_level = min(parent_levels)
+        level_map[role.id] = new_level
+        # Cascade: everything at >= new_level shifts down by 1 (except this role)
+        for r in roles:
+            rl = level_map.get(r.id)
+            if rl is not None and rl >= new_level and r.id != role.id:
+                level_map[r.id] = rl + 1
+
+    # Re-resolve non-foundation, non-inserted roles whose parent levels changed
+    changed = True
+    while changed:
+        changed = False
+        for role in roles:
+            if role.name in ROLE_LEVEL or role.id in inserted_ids:
+                continue
+            levels = get_parent_levels(role.id)
+            if not levels:
+                continue
+            expected = min(levels) - 1
+            if level_map.get(role.id) != expected:
+                level_map[role.id] = expected
+                changed = True
+
     result = []
     for role in roles:
         level = level_map[role.id]
         effective_perms = get_effective_permissions(role.id, db)
+        parent_ids = get_parent_ids(role.id)
         result.append({
             "id": role.id,
             "name": role.name,
@@ -355,8 +427,9 @@ def get_hierarchy_structure(db: Session) -> list[dict]:
             "description": get_role_description(role),
             "effective_permissions": sorted(effective_perms),
             "inherited_from": [
-                {"id": r.id, "name": r.name, "display_name": ROLE_DISPLAY.get(r.name, r.name)}
-                for r in role.inherited_roles if not r.deleted
+                {"id": pid, "name": role_map[pid].name,
+                 "display_name": ROLE_DISPLAY.get(role_map[pid].name, role_map[pid].name)}
+                for pid in parent_ids
             ],
         })
     result.sort(key=lambda r: (r["level"], r["name"]))

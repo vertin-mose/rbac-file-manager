@@ -55,6 +55,10 @@ export function updateFile(fileId: number, file: File) {
     })
 }
 
+export function updateFileTextContent(fileId: number, content: string): Promise<any> {
+    return request.put(`/files/${fileId}/content/text`, { content })
+}
+
 export function createDirectory(name: string, parentId: number = 0) {
     return request.post('/files/directory', { file_name: name, parent_id: parentId })
 }
@@ -126,6 +130,13 @@ export async function downloadFile(id: number): Promise<Blob> {
         responseType: 'blob',
     })
     return res as unknown as Blob
+}
+
+export async function getFileTextContent(id: number): Promise<string> {
+    const res = await request.get(`/files/${id}/content/text`, {
+        responseType: 'text',
+    })
+    return res as unknown as string
 }
 
 export function getDownloadUrl(id: number): string {

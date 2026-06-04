@@ -22,7 +22,7 @@ from services import (
     get_file, get_file_activities, get_file_content, get_file_permissions, get_hierarchy, get_hierarchy_structure, get_role, get_user_info,
     list_files, list_roles, list_users, login, query_audit_logs, record_audit, register,
     rename_file, review_file, approve_file,
-    set_file_permissions, share_file, toggle_user_status, update_file_content, update_own_profile, update_role, upload_file,
+    set_file_permissions, share_file, toggle_user_status, update_file_content, update_file_text_content, update_own_profile, update_role, upload_file,
 )
 
 # ── Database ───────────────────────────────────────────────────────────────
@@ -456,6 +456,33 @@ async def api_update_file_content(file_id: int, request: Request,
     record_audit(db, request.state.user_id, request.state.username, "UPDATE_FILE",
                  detail=f"更新了文件{f.file_name if f else file_id}的内容")
     return ApiResponse.success(result, message="File updated")
+
+
+@app.put("/api/files/{file_id}/content/text")
+async def api_update_file_text_content(file_id: int, data: dict, request: Request,
+                                        db: Session = Depends(get_db),
+                                        _=Depends(require_perm("doc:edit"))):
+    await get_current_user(request)
+    result = update_file_text_content(db, file_id, data["content"],
+                                       request.state.user_id, request.state.roles)
+    from models import FileRecord
+    f = db.get(FileRecord, file_id)
+    record_audit(db, request.state.user_id, request.state.username, "EDIT_FILE",
+                 detail=f"编辑了文件{f.file_name if f else file_id}的内容")
+    return ApiResponse.success(result, message="File saved")
+
+
+@app.get("/api/files/{file_id}/content/text")
+async def api_get_file_text_content(file_id: int, request: Request = None, db: Session = Depends(get_db),
+                                     _=Depends(require_perm("doc:edit"))):
+    """Return file content as plain text (for inline editing). Logs as EDIT_FILE."""
+    await get_current_user(request)
+    content, mime_type, file_name = get_file_content(db, file_id,
+                                                      request.state.user_id, request.state.roles)
+    record_audit(db, request.state.user_id, request.state.username, "EDIT_FILE",
+                 detail=f"打开编辑了文件{file_name}")
+    return Response(content=content, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'inline; filename="{file_name}"'})
 
 
 @app.get("/api/files/{file_id}/activities")

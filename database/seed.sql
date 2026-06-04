@@ -8,7 +8,8 @@ INSERT INTO permissions (name, description, category) VALUES
 -- Document permissions
 ('doc:create',  'Create directories and upload files',                 'document'),
 ('doc:read',    'View, preview, search and download documents',      'document'),
-('doc:update',  'Rename files or directories, update file content',  'document'),
+('doc:update',  'Rename files or directories, update file content (upload replacement)',  'document'),
+('doc:edit',    'Edit file text content inline',              'document'),
 ('doc:delete',  'Delete files and directories',                      'document'),
 ('doc:review',  'Review documents and suggest changes',    'document'),
 ('doc:approve', 'Approve/reject document reviews',         'document'),
@@ -66,12 +67,12 @@ WHERE r.name = 'REVIEWER' AND p.name IN (
     'doc:review', 'doc:comment'
 );
 
--- EDITOR: create + update + share + comment (inherits VIEWER through hierarchy)
+-- EDITOR: create + update + edit + share + comment (inherits VIEWER through hierarchy)
 -- NOTE: EDITOR deliberately lacks doc:review (separation of duties — editors should not review their own work)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'EDITOR' AND p.name IN (
-    'doc:create', 'doc:update', 'doc:share', 'doc:comment'
+    'doc:create', 'doc:update', 'doc:edit', 'doc:share', 'doc:comment'
 );
 
 -- MANAGER: delete + approve + user:read + role:read (inherits EDITOR + REVIEWER through hierarchy)

@@ -53,7 +53,7 @@ def _seed_permissions(session) -> dict[str, Permission]:
         ("doc:update", "document"), ("doc:delete", "document"),
         ("doc:review", "document"), ("doc:approve", "document"),
         ("doc:comment", "document"), ("doc:share", "document"),
-        ("doc:export", "document"),
+        ("doc:export", "document"), ("doc:edit", "document"),
         ("user:read", "user"), ("user:create", "user"),
         ("user:update", "user"), ("user:delete", "user"),
         ("role:read", "role"), ("role:create", "role"),
@@ -77,7 +77,7 @@ def _seed_roles(session, perms: dict[str, Permission]) -> dict[str, Role]:
     role_perms = {
         "VIEWER":     ["doc:read", "doc:export"],
         "REVIEWER":   ["doc:review", "doc:comment"],
-        "EDITOR":     ["doc:create", "doc:update", "doc:share", "doc:comment"],
+        "EDITOR":     ["doc:create", "doc:update", "doc:edit", "doc:share", "doc:comment"],
         "MANAGER":    ["doc:delete", "doc:approve", "user:read", "role:read", "audit:read"],
         # ADMIN now gets file:permission:manage
         "ADMIN":      ["user:create", "user:update", "user:delete",

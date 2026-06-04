@@ -20,7 +20,8 @@ export const PERMISSION_CATEGORY_META: Record<
 export const PERMISSIONS: Permission[] = [
     { id: 1, name: 'doc:create', description: '创建目录、上传文件', category: 'document' },
     { id: 2, name: 'doc:read', description: '查看文件列表、预览与下载文档', category: 'document' },
-    { id: 3, name: 'doc:update', description: '重命名文件或目录、更新文件内容', category: 'document' },
+    { id: 3, name: 'doc:update', description: '重命名文件或目录、更新文件内容（上传替换）', category: 'document' },
+    { id: 24, name: 'doc:edit', description: '在线编辑文件文本内容', category: 'document' },
     { id: 4, name: 'doc:delete', description: '删除文件与目录', category: 'document' },
     { id: 5, name: 'doc:review', description: '提交或处理文档审阅', category: 'document' },
     { id: 6, name: 'doc:approve', description: '审批文档流转结果', category: 'document' },
@@ -46,6 +47,7 @@ export const PERMISSIONS: Permission[] = [
 const DISPLAY_OVERRIDES: Record<string, string> = {
     'file:permission:manage': '文件授权',
     'doc:update': '更新文档',
+    'doc:edit': '编辑文件',
     'doc:export': '下载文档',
     'user:update': '启用用户',
 }

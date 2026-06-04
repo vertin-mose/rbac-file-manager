@@ -1060,10 +1060,59 @@ def update_file_content(db: Session, file_id: int, file: UploadFile,
     return _file_to_dict(f)
 
 
+def update_file_text_content(db: Session, file_id: int, text_content: str,
+                              user_id: int, roles: list[str]) -> dict:
+    """Overwrite file content with raw text, reset status to draft."""
+    f = db.get(FileRecord, file_id)
+    if not f or f.deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    if f.is_directory:
+        raise HTTPException(status_code=400, detail="Cannot update a directory")
+    if not _check_file_permission(db, file_id, user_id, roles, "write"):
+        raise HTTPException(status_code=403, detail="No permission to update this file")
+
+    content = text_content.encode("utf-8")
+    storage_name = f"{uuid.uuid4().hex}.txt"
+
+    minio_client = get_minio_client()
+    if minio_client:
+        minio_client.put_object(settings.MINIO_BUCKET, storage_name,
+                                io.BytesIO(content), len(content))
+        f.storage_url = f"{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{storage_name}"
+    else:
+        local_dir = os.path.join(os.path.dirname(__file__), "storage")
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, storage_name)
+        with open(local_path, "wb") as fh:
+            fh.write(content)
+        f.storage_url = f"local://{storage_name}"
+
+    # Update metadata
+    f.size = len(content)
+    f.mime_type = "text/plain; charset=utf-8"
+
+    # Reset status to draft
+    f.status = "draft"
+    f.review_comment = None
+    f.reviewed_by = None
+    f.reviewed_at = None
+
+    # Mark all current activities as history
+    db.query(FileActivity).filter(
+        FileActivity.file_id == file_id,
+        FileActivity.is_history == False,
+    ).update({"is_history": True}, synchronize_session=False)
+
+    db.commit()
+    db.refresh(f)
+    return _file_to_dict(f)
+
+
 def ensure_missing_permissions(db: Session):
-    """Ensure file:permission:manage exists and is assigned to ADMIN role.
+    """Ensure file:permission:manage and doc:edit exist and are properly assigned.
     Safe to call on every startup — skips if already seeded.
     """
+    # ── file:permission:manage → ADMIN ──
     perm = db.query(Permission).filter(
         Permission.name == "file:permission:manage", Permission.deleted == False
     ).first()
@@ -1078,6 +1127,23 @@ def ensure_missing_permissions(db: Session):
     admin_role = db.query(Role).filter(Role.name == "ADMIN", Role.deleted == False).first()
     if admin_role and perm not in admin_role.permissions:
         admin_role.permissions.append(perm)
+        db.commit()
+
+    # ── doc:edit → EDITOR ──
+    edit_perm = db.query(Permission).filter(
+        Permission.name == "doc:edit", Permission.deleted == False
+    ).first()
+    if not edit_perm:
+        edit_perm = Permission(name="doc:edit",
+                               description="Inline edit file text content",
+                               category="document")
+        db.add(edit_perm)
+        db.commit()
+        db.refresh(edit_perm)
+
+    editor_role = db.query(Role).filter(Role.name == "EDITOR", Role.deleted == False).first()
+    if editor_role and edit_perm not in editor_role.permissions:
+        editor_role.permissions.append(edit_perm)
         db.commit()
 
     _ensure_hierarchy_integrity(db)

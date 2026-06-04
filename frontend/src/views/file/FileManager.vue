@@ -153,6 +153,14 @@
                       查看
                     </el-button>
                     <el-button
+                      v-if="!row.isDirectory && userStore.hasPermission('doc:edit')"
+                      link
+                      type="primary"
+                      @click.stop="handleEditFile(row)"
+                    >
+                      编辑
+                    </el-button>
+                    <el-button
                       v-if="!row.isDirectory"
                       link
                       type="primary"
@@ -299,6 +307,34 @@
       @close="dialogs.activity.visible = false"
       @updated="refreshAll"
     />
+
+    <el-dialog
+      v-model="dialogs.edit.visible"
+      title="编辑文件"
+      width="820px"
+      :close-on-click-modal="false"
+      @closed="dialogs.edit.content = ''"
+    >
+      <template #header>
+        <div class="edit-dialog-header">
+          <span>编辑文件</span>
+          <span class="edit-file-name">{{ dialogs.edit.fileName }}</span>
+        </div>
+      </template>
+      <div v-loading="dialogs.edit.loading" class="edit-textarea-wrap">
+        <el-input
+          v-model="dialogs.edit.content"
+          type="textarea"
+          :autosize="{ minRows: 18, maxRows: 30 }"
+          :disabled="dialogs.edit.saving"
+          class="edit-textarea"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="dialogs.edit.visible = false" :disabled="dialogs.edit.saving">取消</el-button>
+        <el-button type="primary" @click="submitEdit" :loading="dialogs.edit.saving">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -314,9 +350,11 @@ import {
   createDirectory,
   deleteFile,
   downloadFile,
+  getFileTextContent,
   renameFile,
   shareFile,
   updateFile,
+  updateFileTextContent,
   uploadFile,
   type FileItem,
 } from '@/api/file'
@@ -347,6 +385,14 @@ const dialogs = reactive({
     fileId: 0,
     fileName: '',
     mode: 'review' as 'review' | 'approve' | 'comment',
+  },
+  edit: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
+    content: '',
+    loading: false,
+    saving: false,
   },
   permission: {
     visible: false,
@@ -570,6 +616,42 @@ async function handleDownloadFile(row: FileItem) {
   }
 }
 
+async function handleEditFile(row: FileItem) {
+  if (row.isDirectory) return
+  dialogs.edit.fileId = row.id
+  dialogs.edit.fileName = row.fileName
+  dialogs.edit.content = ''
+  dialogs.edit.loading = true
+  dialogs.edit.visible = true
+  try {
+    dialogs.edit.content = await getFileTextContent(row.id)
+  } catch (e: any) {
+    const detail = e?.response?.data?.message || e?.response?.data?.detail || e?.message || ''
+    ElMessage.error(detail || '文件内容加载失败')
+    dialogs.edit.visible = false
+  } finally {
+    dialogs.edit.loading = false
+  }
+}
+
+async function submitEdit() {
+  if (!dialogs.edit.content.trim() && dialogs.edit.content.length === 0) {
+    ElMessage.warning('文件内容不能为空')
+    return
+  }
+  dialogs.edit.saving = true
+  try {
+    await updateFileTextContent(dialogs.edit.fileId, dialogs.edit.content)
+    dialogs.edit.visible = false
+    ElMessage.success('文件已保存')
+    await refreshAll()
+  } catch {
+    ElMessage.error('保存失败')
+  } finally {
+    dialogs.edit.saving = false
+  }
+}
+
 function triggerFileUpload() {
   fileInputRef.value?.click()
 }
@@ -717,6 +799,26 @@ onMounted(async () => {
 
 .name-cell:hover .file-name-text {
   text-decoration: underline;
+}
+
+.edit-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.edit-file-name {
+  font-size: 14px;
+  font-weight: 400;
+  color: #7c8b99;
+}
+.edit-textarea-wrap {
+  min-height: 360px;
+}
+.edit-textarea :deep(textarea) {
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
 }
 
 @media (max-width: 1080px) {

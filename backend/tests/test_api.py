@@ -43,6 +43,7 @@ def seeded_session(test_session_factory):
         ("doc:create","document"), ("doc:read","document"), ("doc:update","document"),
         ("doc:delete","document"), ("doc:review","document"), ("doc:approve","document"),
         ("doc:comment","document"), ("doc:share","document"), ("doc:export","document"),
+        ("doc:edit","document"),
         ("user:read","user"), ("user:create","user"), ("user:update","user"),
         ("user:delete","user"),
         ("role:read","role"), ("role:create","role"), ("role:update","role"),
@@ -61,7 +62,7 @@ def seeded_session(test_session_factory):
     role_perms = {
         "VIEWER":     ["doc:read", "doc:export"],
         "REVIEWER":   ["doc:review", "doc:comment"],
-        "EDITOR":     ["doc:create", "doc:update", "doc:share", "doc:comment"],
+        "EDITOR":     ["doc:create", "doc:update", "doc:edit", "doc:share", "doc:comment"],
         "MANAGER":    ["doc:delete", "doc:approve", "user:read", "role:read", "audit:read"],
         "ADMIN":      ["user:create", "user:update", "user:delete",
                        "role:create", "role:update", "role:delete", "role:assign",

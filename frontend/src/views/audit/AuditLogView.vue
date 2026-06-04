@@ -166,6 +166,7 @@ const actionOptions: Array<{ value: string; label: string; type: TagType }> = [
   { value: 'TOGGLE_USER_STATUS', label: '启用/禁用',  type: 'warning' },
   { value: 'UPDATE_USER',       label: '更新用户',    type: 'primary' },
   { value: 'UPDATE_FILE',       label: '更新文件',    type: 'primary' },
+  { value: 'EDIT_FILE',         label: '编辑文件',    type: 'primary' },
   { value: 'DELETE_ACTIVITY',   label: '删除记录',    type: 'danger'  },
 ]
 

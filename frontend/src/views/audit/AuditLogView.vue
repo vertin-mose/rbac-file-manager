@@ -161,6 +161,12 @@ const actionOptions: Array<{ value: string; label: string; type: TagType }> = [
   { value: 'DELETE_ROLE',       label: '删除角色',    type: 'danger'  },
   { value: 'ASSIGN_PERMISSIONS', label: '配置权限',   type: 'warning' },
   { value: 'ASSIGN_USER_ROLES', label: '分配角色',    type: 'primary' },
+  { value: 'CREATE_USER',       label: '创建用户',    type: 'primary' },
+  { value: 'DELETE_USER',       label: '删除用户',    type: 'danger'  },
+  { value: 'TOGGLE_USER_STATUS', label: '启用/禁用',  type: 'warning' },
+  { value: 'UPDATE_USER',       label: '更新用户',    type: 'primary' },
+  { value: 'UPDATE_FILE',       label: '更新文件',    type: 'primary' },
+  { value: 'DELETE_ACTIVITY',   label: '删除记录',    type: 'danger'  },
 ]
 
 function actionMeta(action: string): { label: string; type: TagType } {

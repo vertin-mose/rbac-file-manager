@@ -22,6 +22,16 @@ export interface RoleHierarchyItem {
     inheritedRoleName: string
 }
 
+export interface HierarchyRole {
+    id: number
+    name: string
+    level: number
+    display_name: string
+    description: string
+    effective_permissions: string[]
+    inherited_from: { id: number; name: string; display_name: string }[]
+}
+
 function mapPermission(item: any): Permission {
     return {
         id: item.id,
@@ -56,12 +66,19 @@ export async function getRoleHierarchy(): Promise<RoleHierarchyItem[]> {
     }))
 }
 
-export function createRole(data: { name: string; description: string; permissionIds: number[] }) {
+export function createRole(data: { name: string; description: string; permissionIds: number[]; inheritedRoleIds?: number[]; rewireChildren?: boolean }) {
     return request.post('/roles', {
         name: data.name,
         description: data.description,
         permission_ids: data.permissionIds,
+        inherited_role_ids: data.inheritedRoleIds || [],
+        rewire_children: data.rewireChildren || false,
     })
+}
+
+export async function getRoleHierarchyStructure(): Promise<HierarchyRole[]> {
+    const res: any = await request.get('/roles/hierarchy/structure')
+    return res.data || []
 }
 
 export function updateRole(id: number, data: Partial<Role>) {
@@ -124,4 +141,11 @@ export function toggleUserStatus(userId: number) {
 
 export function adminDeleteUser(userId: number) {
     return request.delete(`/users/${userId}`)
+}
+
+export function adminUpdateUser(
+    userId: number,
+    data: { display_name?: string; email?: string; reset_password?: boolean },
+) {
+    return request.put(`/users/${userId}`, data)
 }

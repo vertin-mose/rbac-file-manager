@@ -84,7 +84,7 @@
             <span v-if="!row.roles || row.roles.length === 0" style="color:#999">--</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right" v-if="userStore.highestLevel <= 2">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button
@@ -94,6 +94,14 @@
                 @click="openAssignDialog(row)"
               >
                 分配角色
+              </el-button>
+              <el-button
+                v-if="userStore.hasPermission('user:update')"
+                link
+                type="primary"
+                @click="openEditDialog(row)"
+              >
+                编辑
               </el-button>
               <el-button
                 v-if="userStore.hasPermission('user:update')"
@@ -151,6 +159,30 @@
       </template>
     </el-dialog>
 
+    <!-- Edit User Dialog -->
+    <el-dialog v-model="editDialog.visible" title="编辑用户" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="用户名">
+          <el-input :model-value="editDialog.username" disabled />
+        </el-form-item>
+        <el-form-item label="显示名称">
+          <el-input v-model="editDialog.form.displayName" placeholder="选填" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="editDialog.form.email" placeholder="选填" />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="editDialog.resetPassword">
+            重置密码为 <strong>123456</strong>
+          </el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="editLoading" @click="submitEditUser">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- Assign Role Dialog -->
     <el-dialog v-model="assignDialog.visible" title="分配角色" width="480px">
       <div style="margin-bottom: 12px">
@@ -177,7 +209,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import {
-  adminCreateUser, adminDeleteUser, assignUserRoles, getRoles, getUserInfo,
+  adminCreateUser, adminDeleteUser, adminUpdateUser, assignUserRoles, getRoles, getUserInfo,
   listUsers, toggleUserStatus, type UserBasic,
 } from '@/api/role'
 import { useUserStore } from '@/store/user'
@@ -205,6 +237,18 @@ const createDialog = reactive({
     email: '',
     roleIds: [] as number[],
   },
+})
+
+const editLoading = ref(false)
+const editDialog = reactive({
+  visible: false,
+  userId: 0,
+  username: '',
+  form: {
+    displayName: '',
+    email: '',
+  },
+  resetPassword: false,
 })
 
 const assignDialog = reactive({
@@ -295,6 +339,35 @@ async function submitCreateUser() {
     ElMessage.error(msg)
   } finally {
     createLoading.value = false
+  }
+}
+
+function openEditDialog(user: any) {
+  editDialog.userId = user.id
+  editDialog.username = user.username
+  editDialog.form.displayName = user.display_name || ''
+  editDialog.form.email = user.email || ''
+  editDialog.resetPassword = false
+  editDialog.visible = true
+}
+
+async function submitEditUser() {
+  if (!editDialog.userId) return
+  editLoading.value = true
+  try {
+    await adminUpdateUser(editDialog.userId, {
+      display_name: editDialog.form.displayName.trim() || undefined,
+      email: editDialog.form.email.trim() || undefined,
+      reset_password: editDialog.resetPassword,
+    })
+    ElMessage.success('用户信息已更新')
+    editDialog.visible = false
+    await loadData()
+  } catch (e: any) {
+    const msg = e?.response?.data?.detail || e?.response?.data?.message || '更新失败'
+    ElMessage.error(msg)
+  } finally {
+    editLoading.value = false
   }
 }
 

@@ -112,6 +112,9 @@ def _seed_hierarchy(session, roles: dict[str, Role]):
 @pytest.fixture()
 def seeded_db(db):
     """Session pre-loaded with full seed data including file:permission:manage."""
+    # Clear any leftover data from previous tests
+    for table in reversed(Base.metadata.sorted_tables):
+        db.execute(table.delete())
     perms = _seed_permissions(db)
     roles = _seed_roles(db, perms)
     _seed_hierarchy(db, roles)

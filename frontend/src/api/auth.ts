@@ -47,3 +47,12 @@ export interface MeResponse {
 export function fetchMe() {
     return request.get('/auth/me')
 }
+
+export function updateProfile(data: {
+    display_name?: string
+    email?: string
+    old_password?: string
+    new_password?: string
+}) {
+    return request.put('/auth/profile', data)
+}

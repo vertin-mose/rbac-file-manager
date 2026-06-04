@@ -281,8 +281,8 @@ async function handleAdd() {
       return !(p.userId && form.selectedUserIds.includes(p.userId))
     })
     .map((p) => ({
-      role_id: p.roleId,
-      user_id: p.userId,
+      role_id: p.roleId ?? undefined,
+      user_id: p.userId ?? undefined,
       permission_type: p.permissionType,
     }))
 

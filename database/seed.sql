@@ -41,11 +41,11 @@ INSERT INTO permissions (name, description, category) VALUES
 --                                                    > REVIEWER (L4) >
 INSERT INTO roles (name, description) VALUES
 ('SUPER_ADMIN', '超级管理员 - 系统最高权限，全部功能模块可见，可管理系统配置与安全策略'),
-('ADMIN',       '系统管理员 - 负责用户管理、角色分配、审计日志导出与系统备份维护'),
+('ADMIN',       '系统管理员 - 负责用户管理、角色分配与审计日志导出等管理工作'),
 ('MANAGER',     '部门经理 - 管理部门文档和团队成员，可审批、删除文档，查看审计日志'),
 ('EDITOR',      '文档编辑员 - 创建、编辑、共享文档，参与文档评论'),
 ('REVIEWER',    '文档审核员 - 审阅文档、添加评论和批注、建议修改'),
-('VIEWER',      '外部访客 - 仅可浏览、搜索和下载文档');
+('VIEWER',      '访客 - 仅可浏览、搜索和下载文档');
 
 
 -- === Role-Permission Mapping ===
@@ -84,22 +84,21 @@ WHERE r.name = 'MANAGER' AND p.name IN (
     'audit:read'
 );
 
--- ADMIN: user:crud + role:crud/assign + audit:export + system:backup (inherits MANAGER)
+-- ADMIN: user:crud + role:crud/assign + audit:export + file:permission:manage (inherits MANAGER)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'ADMIN' AND p.name IN (
     'user:create', 'user:update', 'user:delete',
     'role:create', 'role:update', 'role:delete', 'role:assign',
     'audit:export',
-    'system:backup',
     'file:permission:manage'
 );
 
--- SUPER_ADMIN: system:config (inherits ADMIN = all permissions)
+-- SUPER_ADMIN: system:config + system:backup (inherits ADMIN = all permissions)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'SUPER_ADMIN' AND p.name IN (
-    'system:config'
+    'system:config', 'system:backup'
 );
 
 

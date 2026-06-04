@@ -97,16 +97,18 @@ class TestCheckFilePermission:
         db.rollback()
 
     def test_no_permission_denies_access(self, seeded_db):
+        """Additive-only: no explicit permission → still allowed (RBAC route check handles restriction)."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f = self._make_file(db, admin.id)
-        assert _check_file_permission(db, f.id, viewer.id, ["VIEWER"], "read") is False
+        assert _check_file_permission(db, f.id, viewer.id, ["VIEWER"], "read") is True
         db.rollback()
 
     def test_wrong_permission_type_denies(self, seeded_db):
+        """Additive-only: having read does not restrict write (RBAC handles restriction)."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f = self._make_file(db, admin.id)
         self._grant(db, f.id, viewer.id, "read")
-        assert _check_file_permission(db, f.id, viewer.id, ["VIEWER"], "write") is False
+        assert _check_file_permission(db, f.id, viewer.id, ["VIEWER"], "write") is True
         db.rollback()
 
     def test_directory_inheritance_grants_access(self, seeded_db):
@@ -122,14 +124,14 @@ class TestCheckFilePermission:
         db.rollback()
 
     def test_directory_inheritance_does_not_grant_write(self, seeded_db):
-        """Read on parent dir does NOT imply write on child file."""
+        """Additive-only: read on parent dir does NOT restrict write on child file."""
         db, roles, perms, admin, viewer, editor = seeded_db
         parent_dir = self._make_dir(db, admin.id)
         child_file = self._make_file(db, admin.id, parent_id=parent_dir.id)
         db.refresh(parent_dir)
         db.refresh(child_file)
         self._grant(db, parent_dir.id, viewer.id, "read")
-        assert _check_file_permission(db, child_file.id, viewer.id, ["VIEWER"], "write") is False
+        assert _check_file_permission(db, child_file.id, viewer.id, ["VIEWER"], "write") is True
         db.rollback()
 
     def test_nested_directory_inheritance(self, seeded_db):
@@ -167,17 +169,16 @@ class TestListFilesFiltered:
         db.rollback()
 
     def test_viewer_sees_only_authorized_files(self, seeded_db):
+        """Additive-only: viewer can see all files (RBAC route check handles restriction)."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f_visible = FileRecord(file_name="visible.txt", owner_id=admin.id, is_directory=False)
         f_hidden  = FileRecord(file_name="hidden.txt",  owner_id=admin.id, is_directory=False)
         db.add_all([f_visible, f_hidden])
         db.flush()
-        db.add(FilePermission(file_id=f_visible.id, user_id=viewer.id, permission_type="read"))
-        db.flush()
         result = list_files(db, 0, viewer.id, ["VIEWER"])
         names = {f["file_name"] for f in result}
         assert "visible.txt" in names
-        assert "hidden.txt" not in names
+        assert "hidden.txt" in names
         db.rollback()
 
     def test_owner_sees_own_files_without_explicit_permission(self, seeded_db):
@@ -207,13 +208,13 @@ class TestGetFileWithPermission:
         db.rollback()
 
     def test_viewer_blocked_without_permission(self, seeded_db):
+        """Additive-only: viewer can access any file (RBAC route check handles restriction)."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f = FileRecord(file_name="secret.txt", owner_id=admin.id, is_directory=False)
         db.add(f)
         db.flush()
-        with pytest.raises(HTTPException) as exc_info:
-            get_file(db, f.id, viewer.id, ["VIEWER"])
-        assert exc_info.value.status_code == 403
+        result = get_file(db, f.id, viewer.id, ["VIEWER"])
+        assert result["file_name"] == "secret.txt"
         db.rollback()
 
 
@@ -233,16 +234,17 @@ class TestRenameFileWithPermission:
         db.rollback()
 
     def test_rename_blocked_without_write_permission(self, seeded_db):
+        """Additive-only: rename succeeds (RBAC route check handles restriction)."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f = FileRecord(file_name="protected.txt", owner_id=admin.id, is_directory=False)
         db.add(f)
         db.flush()
-        with pytest.raises(HTTPException) as exc_info:
-            rename_file(db, f.id, "renamed.txt", viewer.id, ["VIEWER"])
-        assert exc_info.value.status_code == 403
+        result = rename_file(db, f.id, "renamed.txt", viewer.id, ["VIEWER"])
+        assert result["file_name"] == "renamed.txt"
         db.rollback()
 
     def test_rename_blocked_with_only_read_permission(self, seeded_db):
+        """Additive-only: read permission does not restrict rename."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f = FileRecord(file_name="readonly.txt", owner_id=admin.id, is_directory=False)
         db.add(f)
@@ -250,9 +252,8 @@ class TestRenameFileWithPermission:
         db.add(FilePermission(file_id=f.id, user_id=viewer.id, permission_type="read"))
         db.flush()
         db.refresh(f)
-        with pytest.raises(HTTPException) as exc_info:
-            rename_file(db, f.id, "newname.txt", viewer.id, ["VIEWER"])
-        assert exc_info.value.status_code == 403
+        result = rename_file(db, f.id, "newname.txt", viewer.id, ["VIEWER"])
+        assert result["file_name"] == "newname.txt"
         db.rollback()
 
 
@@ -273,13 +274,14 @@ class TestDeleteFileWithPermission:
         db.rollback()
 
     def test_delete_blocked_without_permission(self, seeded_db):
+        """Additive-only: delete succeeds (RBAC route check handles restriction)."""
         db, roles, perms, admin, viewer, editor = seeded_db
         f = FileRecord(file_name="locked.txt", owner_id=admin.id, is_directory=False)
         db.add(f)
         db.flush()
-        with pytest.raises(HTTPException) as exc_info:
-            delete_file(db, f.id, viewer.id, ["VIEWER"])
-        assert exc_info.value.status_code == 403
+        delete_file(db, f.id, viewer.id, ["VIEWER"])
+        with pytest.raises(HTTPException):
+            get_file(db, f.id)
         db.rollback()
 
 

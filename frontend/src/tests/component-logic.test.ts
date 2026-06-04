@@ -83,37 +83,47 @@ describe('FileTree — buildTree()', () => {
     })
 })
 
-// ── AuditLogView — actionMap (feat 分支 extra: SET_FILE_PERMISSIONS) ──────────
+// ── AuditLogView — actionMap ────────────────────────────────────────────
 
-describe('AuditLogView — actionMap (feat branch)', () => {
+describe('AuditLogView — actionMap', () => {
     const actionOptions = [
-        { label: '登录', value: 'LOGIN' },
+        { label: '登录成功', value: 'LOGIN' },
         { label: '登录失败', value: 'LOGIN_FAILED' },
-        { label: '登出', value: 'LOGOUT' },
-        { label: '注册', value: 'REGISTER' },
+        { label: '退出登录', value: 'LOGOUT' },
+        { label: '注册账号', value: 'REGISTER' },
+        { label: '查看文件', value: 'VIEW_FILE' },
+        { label: '下载文件', value: 'DOWNLOAD_FILE' },
         { label: '创建目录', value: 'CREATE_DIRECTORY' },
         { label: '上传文件', value: 'UPLOAD_FILE' },
         { label: '重命名文件', value: 'RENAME_FILE' },
         { label: '删除文件', value: 'DELETE_FILE' },
         { label: '共享文件', value: 'SHARE_FILE' },
         { label: '审阅文件', value: 'REVIEW_FILE' },
-        { label: '批准文件', value: 'APPROVE_FILE' },
+        { label: '审批文件', value: 'APPROVE_FILE' },
         { label: '评论文件', value: 'COMMENT_FILE' },
+        { label: '更新文件', value: 'UPDATE_FILE' },
+        { label: '设置文件权限', value: 'SET_FILE_PERMISSIONS' },
+        { label: '删除文件权限', value: 'DELETE_FILE_PERMISSION' },
         { label: '创建角色', value: 'CREATE_ROLE' },
         { label: '更新角色', value: 'UPDATE_ROLE' },
         { label: '删除角色', value: 'DELETE_ROLE' },
-        { label: '分配权限', value: 'ASSIGN_PERMISSIONS' },
+        { label: '配置权限', value: 'ASSIGN_PERMISSIONS' },
         { label: '分配角色', value: 'ASSIGN_USER_ROLES' },
+        { label: '创建用户', value: 'CREATE_USER' },
+        { label: '删除用户', value: 'DELETE_USER' },
+        { label: '启用/禁用', value: 'TOGGLE_USER_STATUS' },
+        { label: '更新用户', value: 'UPDATE_USER' },
+        { label: '删除记录', value: 'DELETE_ACTIVITY' },
     ]
     const actionMap: Record<string, string> = {}
     actionOptions.forEach(o => { actionMap[o.value] = o.label })
 
-    it('LOGIN → 登录', () => expect(actionMap['LOGIN']).toBe('登录'))
+    it('LOGIN → 登录成功', () => expect(actionMap['LOGIN']).toBe('登录成功'))
     it('DELETE_FILE → 删除文件', () => expect(actionMap['DELETE_FILE']).toBe('删除文件'))
     it('ASSIGN_USER_ROLES → 分配角色', () => expect(actionMap['ASSIGN_USER_ROLES']).toBe('分配角色'))
-    it('unknown action → undefined (component falls back to raw value)',
-       () => expect(actionMap['SET_FILE_PERMISSIONS']).toBeUndefined())
-    it('17 entries total', () => expect(Object.keys(actionMap)).toHaveLength(17))
+    it('SET_FILE_PERMISSIONS → 设置文件权限', () => expect(actionMap['SET_FILE_PERMISSIONS']).toBe('设置文件权限'))
+    it('UPDATE_FILE → 更新文件', () => expect(actionMap['UPDATE_FILE']).toBe('更新文件'))
+    it('27 entries total', () => expect(Object.keys(actionMap)).toHaveLength(27))
 })
 
 // ── FilePermissionDialog — permLabel ─────────────────────────────────────────

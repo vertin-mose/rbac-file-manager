@@ -29,12 +29,10 @@ describe('permissions constants (feat branch)', () => {
         expect(new Set(names).size).toBe(names.length)
     })
 
-    it('note: file category is not in PERMISSION_GROUPS (known gap)', () => {
-        // file:permission:manage has category="file" but PERMISSION_GROUPS doesn't include "file"
-        // This is a known inconsistency in the current implementation.
+    it('file category is now included in PERMISSION_GROUPS', () => {
         const known = new Set<string>(PERMISSION_GROUPS)
         const filePerm = PERMISSIONS.find(p => p.name === 'file:permission:manage')
-        expect(known.has(filePerm!.category)).toBe(false)
+        expect(known.has(filePerm!.category)).toBe(true)
     })
 })
 

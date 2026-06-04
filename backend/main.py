@@ -13,15 +13,16 @@ from auth import get_current_user
 from config import settings
 from models import ApiResponse, Base
 from services import (
-    admin_create_user, admin_delete_user, assign_permissions, assign_user_roles,
+    admin_create_user, admin_delete_user, admin_update_user,
+    assign_permissions, assign_user_roles,
     batch_delete_audit_logs, can_manage_file_permissions,
     comment_file, create_directory, create_role, delete_activity, delete_audit_log, delete_file,
     delete_file_permission, delete_role,
     ensure_missing_columns, ensure_missing_permissions, export_audit_logs, get_effective_permissions,
-    get_file, get_file_activities, get_file_content, get_file_permissions, get_hierarchy, get_role, get_user_info,
+    get_file, get_file_activities, get_file_content, get_file_permissions, get_hierarchy, get_hierarchy_structure, get_role, get_user_info,
     list_files, list_roles, list_users, login, query_audit_logs, record_audit, register,
     rename_file, review_file, approve_file,
-    set_file_permissions, share_file, toggle_user_status, update_file_content, update_role, upload_file,
+    set_file_permissions, share_file, toggle_user_status, update_file_content, update_own_profile, update_role, upload_file,
 )
 
 # ── Database ───────────────────────────────────────────────────────────────
@@ -128,6 +129,21 @@ async def api_auth_me(request: Request, db: Session = Depends(get_db)):
     })
 
 
+@app.put("/api/auth/profile")
+async def api_update_profile(data: dict, request: Request,
+                              db: Session = Depends(get_db)):
+    """Current user updates their own display_name, email, or password."""
+    await get_current_user(request)
+    result = update_own_profile(
+        db, request.state.user_id,
+        display_name=data.get("display_name"),
+        email=data.get("email"),
+        old_password=data.get("old_password"),
+        new_password=data.get("new_password"),
+    )
+    return ApiResponse.success(result, message="Profile updated")
+
+
 # ── Role Routes ────────────────────────────────────────────────────────────
 
 @app.get("/api/roles")
@@ -142,6 +158,12 @@ def api_role_hierarchy(request: Request, db: Session = Depends(get_db),
     return ApiResponse.success(get_hierarchy(db))
 
 
+@app.get("/api/roles/hierarchy/structure")
+def api_role_hierarchy_structure(request: Request, db: Session = Depends(get_db),
+                                  _=Depends(require_perm("role:read"))):
+    return ApiResponse.success(get_hierarchy_structure(db))
+
+
 @app.get("/api/roles/{role_id}")
 def api_get_role(role_id: int, request: Request, db: Session = Depends(get_db),
                  _=Depends(require_perm("role:read"))):
@@ -152,7 +174,9 @@ def api_get_role(role_id: int, request: Request, db: Session = Depends(get_db),
 def api_create_role(data: dict, request: Request, db: Session = Depends(get_db),
                     _=Depends(require_perm("role:create"))):
     result = create_role(db, data["name"], data.get("description", ""),
-                         data.get("permission_ids", []))
+                         data.get("permission_ids", []),
+                         data.get("inherited_role_ids"),
+                         data.get("rewire_children", False))
     record_audit(db, request.state.user_id, request.state.username, "CREATE_ROLE",
                  detail=f"创建了角色{data['name']}")
     return ApiResponse.success(result, message="Role created")
@@ -251,6 +275,24 @@ def api_admin_delete_user(user_id: int, request: Request,
     record_audit(db, request.state.user_id, request.state.username, "DELETE_USER",
                  detail=f"删除了用户 {username}")
     return ApiResponse.success(message="User deleted")
+
+
+@app.put("/api/users/{user_id}")
+def api_admin_update_user(user_id: int, data: dict, request: Request,
+                           db: Session = Depends(get_db),
+                           _=Depends(require_perm("user:update"))):
+    result = admin_update_user(
+        db, user_id,
+        display_name=data.get("display_name"),
+        email=data.get("email"),
+        reset_password=data.get("reset_password", False),
+    )
+    from models import User
+    user = db.get(User, user_id)
+    uname = user.username if user else str(user_id)
+    record_audit(db, request.state.user_id, request.state.username, "UPDATE_USER",
+                 detail=f"管理员更新了用户 {uname}")
+    return ApiResponse.success(result, message="User updated")
 
 
 # ── File Routes ────────────────────────────────────────────────────────────

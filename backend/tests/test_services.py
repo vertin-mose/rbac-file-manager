@@ -213,9 +213,10 @@ class TestRoleService:
         assert exc_info.value.status_code == 409
 
     def test_update_role_description(self, seeded_db):
-        db, roles_map, *__ = seeded_db
-        viewer_id = roles_map["VIEWER"].id
-        result = update_role(db, viewer_id, description="Updated description")
+        db, _, perms, *__ = seeded_db
+        # Use a custom role so the description is stored, not looked up from ROLE_DESCRIPTION
+        custom = create_role(db, "UPDATE_TEST", "Original", [perms["doc:read"].id])
+        result = update_role(db, custom["id"], description="Updated description")
         assert result["description"] == "Updated description"
         db.rollback()
 
@@ -377,11 +378,11 @@ class TestFileService:
         db, roles_map, _, admin, *__ = seeded_db
         d = create_directory(db, "Shared", 0, admin.id)
         # Should not raise
-        share_file(db, d["id"], user_ids=[], role_ids=[roles_map["VIEWER"].id])
+        share_file(db, d["id"], user_ids=[admin.id], permission_type="read")
         from models import FilePermission
         entries = db.query(FilePermission).filter(FilePermission.file_id == d["id"]).all()
         assert len(entries) == 1
-        assert entries[0].role_id == roles_map["VIEWER"].id
+        assert entries[0].user_id == admin.id
         db.rollback()
 
     def test_share_nonexistent_file(self, seeded_db):

@@ -2,9 +2,15 @@
 
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, BigInteger, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, BigInteger, DateTime, ForeignKey
 from sqlalchemy.orm import backref, declarative_base, relationship
 from pydantic import BaseModel
+
+# Use Integer for PK/FK (compatible with both MySQL and SQLite).
+# SQLite only auto-increments columns declared exactly as INTEGER PRIMARY KEY,
+# so BigInteger PKs would break in-memory tests.
+# Keep BigInteger only for data columns that need the range (e.g. file sizes).
+PkType = Integer
 
 # ── SQLAlchemy ORM Models ──────────────────────────────────────────────────
 
@@ -13,7 +19,7 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(PkType, primary_key=True, autoincrement=True)
     username = Column(String(50), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
     display_name = Column(String(100))
@@ -28,7 +34,7 @@ class User(Base):
 
 class Role(Base):
     __tablename__ = "roles"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(PkType, primary_key=True, autoincrement=True)
     name = Column(String(50), unique=True, nullable=False)
     description = Column(String(200))
     enabled = Column(Boolean, default=True)
@@ -47,7 +53,7 @@ class Role(Base):
 
 class Permission(Base):
     __tablename__ = "permissions"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(PkType, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
     description = Column(String(200))
     category = Column(String(50))
@@ -58,19 +64,19 @@ class Permission(Base):
 
 class FileRecord(Base):
     __tablename__ = "file_records"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(PkType, primary_key=True, autoincrement=True)
     file_name = Column(String(500), nullable=False)
     file_path = Column(String(1000))
-    parent_id = Column(BigInteger, ForeignKey("file_records.id"))
+    parent_id = Column(PkType, ForeignKey("file_records.id"))
     is_directory = Column(Boolean, default=False)
     size = Column(BigInteger, default=0)
     mime_type = Column(String(100))
-    owner_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(PkType, ForeignKey("users.id"), nullable=False)
     storage_url = Column(String(1000))
     # Status for review workflow: draft → under_review → approved / rejected
     status = Column(String(20), default="draft")
     review_comment = Column(String(500))
-    reviewed_by = Column(BigInteger, ForeignKey("users.id"))
+    reviewed_by = Column(PkType, ForeignKey("users.id"))
     reviewed_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -87,10 +93,10 @@ class FileRecord(Base):
 
 class FilePermission(Base):
     __tablename__ = "file_permissions"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    file_id = Column(BigInteger, ForeignKey("file_records.id"), nullable=False)
-    user_id = Column(BigInteger, ForeignKey("users.id"))
-    role_id = Column(BigInteger, ForeignKey("roles.id"))
+    id = Column(PkType, primary_key=True, autoincrement=True)
+    file_id = Column(PkType, ForeignKey("file_records.id"), nullable=False)
+    user_id = Column(PkType, ForeignKey("users.id"))
+    role_id = Column(PkType, ForeignKey("roles.id"))
     permission_type = Column(String(20), nullable=False)
     granted_at = Column(DateTime, default=datetime.now)
 
@@ -98,9 +104,9 @@ class FilePermission(Base):
 class FileActivity(Base):
     """Stores review/approve/comment history per file version."""
     __tablename__ = "file_activities"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    file_id = Column(BigInteger, ForeignKey("file_records.id"), nullable=False)
-    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    id = Column(PkType, primary_key=True, autoincrement=True)
+    file_id = Column(PkType, ForeignKey("file_records.id"), nullable=False)
+    user_id = Column(PkType, ForeignKey("users.id"), nullable=False)
     activity_type = Column(String(20), nullable=False, comment="review, approve, comment")
     content = Column(String(500))
     approved = Column(Boolean, nullable=True, comment="only for approve type")
@@ -113,8 +119,8 @@ class FileActivity(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    id = Column(PkType, primary_key=True, autoincrement=True)
+    user_id = Column(PkType, nullable=True)
     username = Column(String(50))
     action = Column(String(50), nullable=False)
     detail = Column(String(500))
@@ -128,20 +134,20 @@ class AuditLog(Base):
 # Junction tables (SQLAlchemy needs them for secondary=)
 class UserRole(Base):
     __tablename__ = "user_roles"
-    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(PkType, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(PkType, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
 
 
 class RolePermission(Base):
     __tablename__ = "role_permissions"
-    role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
-    permission_id = Column(BigInteger, ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(PkType, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    permission_id = Column(PkType, ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True)
 
 
 class RoleHierarchy(Base):
     __tablename__ = "role_hierarchy"
-    role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
-    inherited_role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(PkType, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    inherited_role_id = Column(PkType, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
 
 
 # ── Pydantic Schemas ───────────────────────────────────────────────────────

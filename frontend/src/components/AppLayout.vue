@@ -24,12 +24,12 @@
           <span>文件管理</span>
         </el-menu-item>
 
-        <el-menu-item v-if="userStore.highestLevel <= 2" index="/users">
+        <el-menu-item v-if="userStore.hasPermission('user:read')" index="/users">
           <el-icon><User /></el-icon>
           <span>用户管理</span>
         </el-menu-item>
 
-        <el-menu-item v-if="userStore.highestLevel <= 2" index="/roles">
+        <el-menu-item v-if="userStore.hasPermission('role:read')" index="/roles">
           <el-icon><Setting /></el-icon>
           <span>角色管理</span>
         </el-menu-item>

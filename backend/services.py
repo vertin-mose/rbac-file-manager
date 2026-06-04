@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import HTTPException, UploadFile
 from minio import Minio
 from sqlalchemy import desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import create_token, hash_password, verify_password
@@ -51,11 +52,15 @@ def get_effective_permissions(role_id: int, db: Session) -> set[str]:
             return
         visited.add(rid)
         role = db.get(Role, rid)
-        if not role or role.deleted:
+        if not role:
             return
-        for p in role.permissions:
-            if not p.deleted:
-                result.add(p.name)
+        # Deleted roles: skip their own permissions but still traverse inherited
+        # roles so the chain isn't broken (e.g. ADMIN → deleted_custom → MANAGER
+        # should still deliver MANAGER's permissions to ADMIN).
+        if not role.deleted:
+            for p in role.permissions:
+                if not p.deleted:
+                    result.add(p.name)
         for ir in role.inherited_roles:
             collect(ir.id)
 
@@ -65,15 +70,6 @@ def get_effective_permissions(role_id: int, db: Session) -> set[str]:
 
 # ── Auth Service ───────────────────────────────────────────────────────────
 
-# Role display names & levels (for enterprise document management)
-ROLE_DISPLAY = {
-    'SUPER_ADMIN': '超级管理员',
-    'ADMIN': '系统管理员',
-    'MANAGER': '部门经理',
-    'EDITOR': '文档编辑员',
-    'REVIEWER': '文档审核员',
-    'VIEWER': '外部访客',
-}
 ROLE_LEVEL = {
     'SUPER_ADMIN': 1,
     'ADMIN': 2,
@@ -83,7 +79,6 @@ ROLE_LEVEL = {
     'VIEWER': 5,
 }
 
-# Override the garbled seed/display text with canonical role labels and descriptions.
 ROLE_DISPLAY = {
     'SUPER_ADMIN': '超级管理员',
     'ADMIN': '系统管理员',
@@ -94,7 +89,7 @@ ROLE_DISPLAY = {
 }
 ROLE_DESCRIPTION = {
     'SUPER_ADMIN': '系统最高权限，管理全部功能模块与系统配置。',
-    'ADMIN': '负责用户、角色、审计导出和系统备份等管理工作。',
+    'ADMIN': '负责用户、角色与审计日志导出等管理工作。',
     'MANAGER': '管理部门文档和成员，可审批、删除文档并查看审计日志。',
     'EDITOR': '负责创建、编辑、共享文档，并参与评论协作。',
     'REVIEWER': '负责审阅文档、添加评论与批注，并提出修改建议。',
@@ -196,17 +191,51 @@ def get_role(db: Session, role_id: int) -> dict:
     }
 
 
-def create_role(db: Session, name: str, description: str = "", permission_ids: list[int] = None) -> dict:
+def create_role(db: Session, name: str, description: str = "",
+                permission_ids: list[int] = None,
+                inherited_role_ids: list[int] = None,
+                rewire_children: bool = False) -> dict:
+    """Create a role with optional hierarchy position and initial permissions."""
+    # Only check non-deleted roles — deleted role names can be reused
     exists = db.query(Role).filter(Role.name == name, Role.deleted == False).first()
     if exists:
-        raise HTTPException(status_code=409, detail="Role name already exists")
+        raise HTTPException(status_code=409, detail="角色名已存在")
+    # If a deleted role has this name, rename it to free the name for reuse
+    deleted = db.query(Role).filter(Role.name == name, Role.deleted == True).first()
+    if deleted:
+        deleted.name = f"{name}_deleted_{deleted.id}"
+        db.commit()
     role = Role(name=name, description=description)
     if permission_ids:
         perms = db.query(Permission).filter(Permission.id.in_(permission_ids)).all()
         role.permissions = perms
     db.add(role)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="角色名冲突，请更换名称")
     db.refresh(role)
+
+    if inherited_role_ids:
+        for ir_id in inherited_role_ids:
+            ir = db.get(Role, ir_id)
+            if ir and not ir.deleted:
+                hierarchy_entry = RoleHierarchy(role_id=role.id, inherited_role_id=ir_id)
+                db.add(hierarchy_entry)
+        db.commit()
+        db.refresh(role)
+
+    # Rewire: make all direct children of inherited roles point to the new role instead
+    if rewire_children and inherited_role_ids:
+        children = db.query(RoleHierarchy).filter(
+            RoleHierarchy.inherited_role_id.in_(inherited_role_ids),
+            RoleHierarchy.role_id != role.id,
+        ).all()
+        for child_entry in children:
+            child_entry.inherited_role_id = role.id
+        db.commit()
+
     return get_role(db, role.id)
 
 
@@ -216,10 +245,10 @@ def update_role(db: Session, role_id: int, name: Optional[str] = None,
     if not role or role.deleted:
         raise HTTPException(status_code=404, detail="Role not found")
     if name:
-        existing = db.query(Role).filter(Role.name == name, Role.id != role_id,
-                                          Role.deleted == False).first()
+        # Check all roles (including deleted) to avoid unique constraint violation
+        existing = db.query(Role).filter(Role.name == name, Role.id != role_id).first()
         if existing:
-            raise HTTPException(status_code=409, detail="Role name already exists")
+            raise HTTPException(status_code=409, detail="角色名已存在")
         role.name = name
     if description is not None:
         role.description = description
@@ -232,13 +261,26 @@ def delete_role(db: Session, role_id: int):
     role = db.get(Role, role_id)
     if not role or role.deleted:
         raise HTTPException(status_code=404, detail="Role not found")
+
+    # Reconnect children to this role's parents before deleting,
+    # so the inheritance chain is not broken (e.g. ADMIN → a → MANAGER
+    # becomes ADMIN → MANAGER when "a" is deleted).
+    parents = [r.id for r in role.inherited_roles]
+    children = db.query(RoleHierarchy).filter(
+        RoleHierarchy.inherited_role_id == role_id
+    ).all()
+    if children and parents:
+        for child in children:
+            child.inherited_role_id = parents[0]
+    elif children and not parents:
+        # Orphan children — delete the link
+        for child in children:
+            db.delete(child)
+
     role.permissions = []
     role.inherited_roles = []
     db.query(UserRole).filter(UserRole.role_id == role_id).delete(synchronize_session=False)
     db.query(RolePermission).filter(RolePermission.role_id == role_id).delete(synchronize_session=False)
-    db.query(RoleHierarchy).filter(
-        RoleHierarchy.inherited_role_id == role_id
-    ).delete(synchronize_session=False)
     role.deleted = True
     db.commit()
 
@@ -262,6 +304,62 @@ def get_hierarchy(db: Session) -> list[dict]:
             result.append({"role_id": row.role_id, "role_name": senior.name,
                            "inherited_role_id": row.inherited_role_id,
                            "inherited_role_name": junior.name})
+    return result
+
+
+def get_hierarchy_structure(db: Session) -> list[dict]:
+    """Return all active roles sorted by level with their inherited permissions."""
+    roles = db.query(Role).filter(Role.deleted == False).all()
+    level_map: dict[int, int] = {}
+
+    # Pass 1: roles with hardcoded level or direct inheritance from known roles
+    for role in roles:
+        if role.name in ROLE_LEVEL:
+            level_map[role.id] = ROLE_LEVEL[role.name]
+        else:
+            inherited = [r for r in role.inherited_roles if not r.deleted]
+            if inherited:
+                known = [ROLE_LEVEL.get(r.name) for r in inherited]
+                known = [l for l in known if l is not None]
+                level_map[role.id] = min(known) - 1 if known else None
+            else:
+                level_map[role.id] = 99
+
+    # Pass 2: iterative resolution for chained custom roles (a → b → MANAGER)
+    changed = True
+    while changed:
+        changed = False
+        for role in roles:
+            if level_map.get(role.id) is None:
+                inherited = [r for r in role.inherited_roles if not r.deleted]
+                levels = [level_map.get(r.id) for r in inherited]
+                levels = [l for l in levels if l is not None]
+                if levels:
+                    level_map[role.id] = min(levels) - 1
+                    changed = True
+
+    # Pass 3: remaining unresolvable → level 99
+    for role in roles:
+        if level_map.get(role.id) is None:
+            level_map[role.id] = 99
+
+    result = []
+    for role in roles:
+        level = level_map[role.id]
+        effective_perms = get_effective_permissions(role.id, db)
+        result.append({
+            "id": role.id,
+            "name": role.name,
+            "level": level,
+            "display_name": ROLE_DISPLAY.get(role.name, role.name),
+            "description": get_role_description(role),
+            "effective_permissions": sorted(effective_perms),
+            "inherited_from": [
+                {"id": r.id, "name": r.name, "display_name": ROLE_DISPLAY.get(r.name, r.name)}
+                for r in role.inherited_roles if not r.deleted
+            ],
+        })
+    result.sort(key=lambda r: (r["level"], r["name"]))
     return result
 
 
@@ -339,6 +437,47 @@ def admin_delete_user(db: Session, user_id: int):
     user.deleted = True
     user.roles = []
     db.commit()
+
+
+def admin_update_user(db: Session, user_id: int, display_name: str = None,
+                       email: str = None, reset_password: bool = False) -> dict:
+    """Admin updates user info or resets password to 123456."""
+    user = db.get(User, user_id)
+    if not user or user.deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    if display_name is not None:
+        user.display_name = display_name
+    if email is not None:
+        user.email = email
+    if reset_password:
+        user.password = hash_password("123456")
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username,
+            "display_name": user.display_name, "email": user.email,
+            "reset_password": reset_password}
+
+
+def update_own_profile(db: Session, user_id: int, display_name: str = None,
+                        email: str = None, old_password: str = None,
+                        new_password: str = None) -> dict:
+    """Current user updates their own profile or changes password."""
+    user = db.get(User, user_id)
+    if not user or user.deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    if display_name is not None:
+        user.display_name = display_name
+    if email is not None:
+        user.email = email
+    if new_password:
+        if not old_password or not verify_password(old_password, user.password):
+            raise HTTPException(status_code=400, detail="旧密码不正确")
+        user.password = hash_password(new_password)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username,
+            "display_name": user.display_name, "email": user.email,
+            "password_changed": bool(new_password)}
 
 
 # ── File Service ───────────────────────────────────────────────────────────
@@ -866,6 +1005,63 @@ def ensure_missing_permissions(db: Session):
     admin_role = db.query(Role).filter(Role.name == "ADMIN", Role.deleted == False).first()
     if admin_role and perm not in admin_role.permissions:
         admin_role.permissions.append(perm)
+        db.commit()
+
+    _ensure_hierarchy_integrity(db)
+
+
+def _ensure_hierarchy_integrity(db: Session):
+    """Repair broken hierarchy chains caused by previous buggy delete_role code.
+
+    The old delete_role used `RoleHierarchy.inherited_role_id == role_id` to delete
+    hierarchy entries, which removed the ADMIN → {deleted_role} link instead of
+    rewiring it. This left ADMIN with no valid inherited roles, breaking the entire
+    permission inheritance chain. This function restores ADMIN → MANAGER when needed.
+    """
+    admin = db.query(Role).filter(Role.name == "ADMIN", Role.deleted == False).first()
+    manager = db.query(Role).filter(Role.name == "MANAGER", Role.deleted == False).first()
+    if not admin or not manager:
+        return
+
+    # Check if ADMIN has any non-deleted inherited role that eventually reaches MANAGER
+    def _has_chain_to(source_id, target_id, seen=None):
+        if seen is None:
+            seen = set()
+        if source_id == target_id:
+            return True
+        if source_id in seen:
+            return False
+        seen.add(source_id)
+        role = db.get(Role, source_id)
+        if not role or role.deleted:
+            return False
+        for ir in role.inherited_roles:
+            if _has_chain_to(ir.id, target_id, seen):
+                return True
+        return False
+
+    if _has_chain_to(admin.id, manager.id):
+        return
+
+    # Rewire ADMIN away from any deleted role to MANAGER
+    for ir in list(admin.inherited_roles):
+        if ir.deleted:
+            hier = db.query(RoleHierarchy).filter(
+                RoleHierarchy.role_id == admin.id,
+                RoleHierarchy.inherited_role_id == ir.id,
+            ).first()
+            if hier:
+                hier.inherited_role_id = manager.id
+                db.commit()
+                return
+
+    # ADMIN has no inherited roles at all — add direct ADMIN → MANAGER
+    existing = db.query(RoleHierarchy).filter(
+        RoleHierarchy.role_id == admin.id,
+        RoleHierarchy.inherited_role_id == manager.id,
+    ).first()
+    if not existing:
+        db.add(RoleHierarchy(role_id=admin.id, inherited_role_id=manager.id))
         db.commit()
 
 

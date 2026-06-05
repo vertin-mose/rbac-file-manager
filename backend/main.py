@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -341,7 +342,7 @@ async def api_download_file(file_id: int, request: Request = None, db: Session =
     record_audit(db, request.state.user_id, request.state.username, "DOWNLOAD_FILE",
                  detail=f"下载了文件{file_name}")
     return Response(content=content, media_type=mime_type,
-                    headers={"Content-Disposition": f'inline; filename="{file_name}"'})
+                    headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(file_name)}"})
 
 
 @app.post("/api/files")
@@ -501,7 +502,7 @@ async def api_get_file_text_content(file_id: int, request: Request = None, db: S
     record_audit(db, request.state.user_id, request.state.username, "EDIT_FILE",
                  detail=f"打开编辑了文件{file_name}")
     return Response(content=content, media_type="text/plain; charset=utf-8",
-                    headers={"Content-Disposition": f'inline; filename="{file_name}"'})
+                    headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(file_name)}"})
 
 
 @app.get("/api/files/{file_id}/activities")

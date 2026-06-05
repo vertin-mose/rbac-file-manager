@@ -6,11 +6,9 @@ from sqlalchemy import Column, Integer, String, Boolean, BigInteger, DateTime, F
 from sqlalchemy.orm import backref, declarative_base, relationship
 from pydantic import BaseModel
 
-# Use Integer for PK/FK (compatible with both MySQL and SQLite).
-# SQLite only auto-increments columns declared exactly as INTEGER PRIMARY KEY,
-# so BigInteger PKs would break in-memory tests.
-# Keep BigInteger only for data columns that need the range (e.g. file sizes).
-PkType = Integer
+# Must match init.sql which uses BIGINT for all PK/FK columns.
+# MySQL rejects foreign keys where INT references BIGINT.
+PkType = BigInteger
 
 # ── SQLAlchemy ORM Models ──────────────────────────────────────────────────
 

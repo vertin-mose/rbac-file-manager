@@ -3,8 +3,9 @@
 import csv
 import io
 import os
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import HTTPException, UploadFile
@@ -19,8 +20,26 @@ from models import (
     AuditLog, FileActivity, FilePermission, FileRecord, Permission, Role, RoleHierarchy, RolePermission, User, UserRole,
 )
 
+# ── Security Constants ──────────────────────────────────────────────────────
+
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_DURATION_MINUTES = 15
+PASSWORD_MIN_LENGTH = 8
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
+def validate_password_strength(password: str) -> str | None:
+    """Return error message if password is too weak, else None."""
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return f"密码长度不能少于{PASSWORD_MIN_LENGTH}位"
+    if not re.search(r"[A-Z]", password):
+        return "密码必须包含至少一个大写字母"
+    if not re.search(r"[a-z]", password):
+        return "密码必须包含至少一个小写字母"
+    if not re.search(r"[0-9]", password):
+        return "密码必须包含至少一个数字"
+
 
 def get_minio_client() -> Optional[Minio]:
     try:
@@ -99,12 +118,41 @@ ROLE_DESCRIPTION = {
 
 def login(db: Session, username: str, password: str, ip: str = "") -> dict:
     user = db.query(User).filter(User.username == username, User.deleted == False).first()
+
+    # ── Account lockout check ──
+    if user and user.locked_until and user.locked_until > datetime.now():
+        remaining = int((user.locked_until - datetime.now()).total_seconds() // 60) + 1
+        record_audit(db, user.id, username, "LOGIN_FAILED",
+                     detail=f"用户{username}登录失败（账户已锁定，剩余{remaining}分钟）", ip=ip, success=False)
+        raise HTTPException(
+            status_code=423,
+            detail=f"账户已被锁定，请在{remaining}分钟后重试",
+        )
+
     if not user or not verify_password(password, user.password):
+        if user:
+            user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+            if user.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
+                user.locked_until = datetime.now() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                record_audit(db, user.id, username, "LOGIN_FAILED",
+                             detail=f"用户{username}连续{MAX_LOGIN_ATTEMPTS}次登录失败，已锁定{LOCKOUT_DURATION_MINUTES}分钟",
+                             ip=ip, success=False)
+                raise HTTPException(
+                    status_code=423,
+                    detail=f"连续{MAX_LOGIN_ATTEMPTS}次登录失败，账户已锁定{LOCKOUT_DURATION_MINUTES}分钟",
+                )
+            db.commit()
         record_audit(db, user.id if user else 0, username, "LOGIN_FAILED",
-                     detail=f"用户{username}登录失败", ip=ip, success=False)
+                     detail=f"用户{username}登录失败（第{user.failed_login_attempts if user else 0}次尝试）",
+                     ip=ip, success=False)
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.enabled:
         raise HTTPException(status_code=403, detail="Account disabled")
+
+    # ── Reset lockout on successful login ──
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    db.commit()
 
     active_roles = [r for r in user.roles if not r.deleted]
     role_names = [r.name for r in active_roles]
@@ -130,6 +178,9 @@ def get_role_description(role: Role) -> str:
 
 def register(db: Session, username: str, password: str,
              display_name: Optional[str] = None, email: Optional[str] = None) -> dict:
+    err = validate_password_strength(password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
     exists = db.query(User).filter(User.username == username, User.deleted == False).first()
     if exists:
         raise HTTPException(status_code=409, detail="Username already taken")
@@ -472,6 +523,9 @@ def admin_create_user(db: Session, username: str, password: str,
                        display_name: str = None, email: str = None,
                        role_ids: list[int] = None) -> dict:
     """Create user with role selection — admin only."""
+    err = validate_password_strength(password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
     exists = db.query(User).filter(User.username == username, User.deleted == False).first()
     if exists:
         raise HTTPException(status_code=409, detail="Username already taken")
@@ -543,6 +597,9 @@ def update_own_profile(db: Session, user_id: int, display_name: str = None,
     if email is not None:
         user.email = email
     if new_password:
+        err = validate_password_strength(new_password)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
         if not old_password or not verify_password(old_password, user.password):
             raise HTTPException(status_code=400, detail="旧密码不正确")
         user.password = hash_password(new_password)
@@ -1208,6 +1265,8 @@ def ensure_missing_columns(db: Session):
     """Auto-add missing columns to existing DB tables (safe no-op if already present)."""
     from sqlalchemy import text, inspect
     inspector = inspect(db.bind)
+
+    # file_records columns
     existing_cols = {c["name"] for c in inspector.get_columns("file_records")}
     migrations = [
         ("status", "VARCHAR(20) DEFAULT 'draft'"),
@@ -1218,6 +1277,17 @@ def ensure_missing_columns(db: Session):
     for col_name, col_def in migrations:
         if col_name not in existing_cols:
             db.execute(text(f"ALTER TABLE file_records ADD COLUMN {col_name} {col_def}"))
+
+    # users columns — account lockout
+    user_cols = {c["name"] for c in inspector.get_columns("users")}
+    user_migrations = [
+        ("failed_login_attempts", "INTEGER DEFAULT 0"),
+        ("locked_until", "DATETIME"),
+    ]
+    for col_name, col_def in user_migrations:
+        if col_name not in user_cols:
+            db.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}"))
+
     db.commit()
 
 

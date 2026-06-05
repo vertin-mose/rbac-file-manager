@@ -133,6 +133,7 @@
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="createDialog.form.password" type="password" placeholder="初始密码" />
+          <span class="password-hint">最少 8 位，需包含大写字母、小写字母和数字</span>
         </el-form-item>
         <el-form-item label="显示名称">
           <el-input v-model="createDialog.form.displayName" placeholder="选填" />
@@ -477,6 +478,14 @@ onMounted(loadData)
 .search-bar {
   display: flex;
   gap: 10px;
+}
+
+.password-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #8496a6;
+  line-height: 1.4;
 }
 
 .table-actions {

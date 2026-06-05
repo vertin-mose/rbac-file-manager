@@ -6,10 +6,10 @@ from sqlalchemy import Column, Integer, String, Boolean, BigInteger, DateTime, F
 from sqlalchemy.orm import backref, declarative_base, relationship
 from pydantic import BaseModel
 
-# Use Integer for PK/FK (compatible with both MySQL and SQLite).
-# SQLite only auto-increments columns declared exactly as INTEGER PRIMARY KEY,
+# Use Integer for PK/FK — compatible with SQLite (auto-increment) and MySQL (INT).
+# init.sql uses INT for PKs; BIGINT is unnecessary for this project's scale.
+# SQLite only auto-increments columns declared as INTEGER PRIMARY KEY,
 # so BigInteger PKs would break in-memory tests.
-# Keep BigInteger only for data columns that need the range (e.g. file sizes).
 PkType = Integer
 
 # ── SQLAlchemy ORM Models ──────────────────────────────────────────────────
@@ -25,6 +25,8 @@ class User(Base):
     display_name = Column(String(100))
     email = Column(String(100))
     enabled = Column(Boolean, default=True)
+    failed_login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     deleted = Column(Boolean, default=False)

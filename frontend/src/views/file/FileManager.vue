@@ -153,7 +153,7 @@
                       查看
                     </el-button>
                     <el-button
-                      v-if="!row.isDirectory && userStore.hasPermission('doc:edit')"
+                      v-if="!row.isDirectory && isTextFile(row) && userStore.hasPermission('doc:edit')"
                       link
                       type="primary"
                       @click.stop="handleEditFile(row)"
@@ -529,6 +529,26 @@ function fileTypeLabel(mimeType: string): string {
   return mimeType.split('/').pop()?.toUpperCase() || '文件'
 }
 
+const EDITABLE_TEXT_EXTENSIONS = new Set([
+  'txt', 'sql', 'md', 'json', 'xml', 'csv', 'yaml', 'yml',
+  'py', 'java', 'js', 'ts', 'html', 'css', 'scss', 'vue', 'jsx', 'tsx',
+  'c', 'cpp', 'h', 'hpp', 'rs', 'go', 'sh', 'bat', 'ini', 'cfg', 'toml',
+  'log', 'env', 'gitignore', 'dockerfile', 'makefile',
+])
+
+function isTextFile(row: { mimeType: string; fileName: string }): boolean {
+  const mime = (row.mimeType || '').toLowerCase()
+  if (mime.startsWith('text/')) return true
+  if (mime === 'application/json' || mime === 'application/xml' || mime === 'application/javascript') return true
+  if (mime.includes('sql')) return true
+  const ext = (row.fileName || '').split('.').pop()?.toLowerCase() || ''
+  return EDITABLE_TEXT_EXTENSIONS.has(ext)
+}
+
+function isImageFile(mimeType: string): boolean {
+  return (mimeType || '').toLowerCase().startsWith('image/')
+}
+
 async function confirmDelete(file: FileItem) {
   try {
     await ElMessageBox.confirm(`确认删除 ${file.fileName} 吗？`, '删除确认', {
@@ -580,17 +600,30 @@ async function handleViewFile(row: FileItem) {
   } else {
     try {
       const blob = await downloadFile(row.id)
+      const mime = (blob.type || '').toLowerCase()
       let url: string
-      // Fix charset for text files to prevent garbled Chinese
-      const mime = blob.type || ''
-      if (/^text\//.test(mime)) {
+
+      if (isTextFile(row)) {
+        // Text files: fix charset and open in new tab for inline viewing
         const text = await blob.text()
-        const fixedBlob = new Blob([text], { type: `${mime.split(';')[0]};charset=utf-8` })
+        const fixedBlob = new Blob([text], { type: `${mime.split(';')[0] || 'text/plain'};charset=utf-8` })
         url = window.URL.createObjectURL(fixedBlob)
-      } else {
+        window.open(url, '_blank')
+      } else if (isImageFile(mime)) {
+        // Images: open as blob (browser will render inline)
         url = window.URL.createObjectURL(blob)
+        window.open(url, '_blank')
+      } else {
+        // Binary or unknown: download instead of viewing
+        const a = document.createElement('a')
+        a.href = window.URL.createObjectURL(blob)
+        a.download = row.fileName
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        ElMessage.info('非文本/图片文件，已触发下载')
+        return
       }
-      window.open(url, '_blank')
     } catch (e: any) {
       const detail = e?.response?.data?.message || e?.response?.data?.detail || ''
       ElMessage.error(detail || '文件无法查看')
@@ -618,6 +651,10 @@ async function handleDownloadFile(row: FileItem) {
 
 async function handleEditFile(row: FileItem) {
   if (row.isDirectory) return
+  if (!isTextFile(row)) {
+    ElMessage.warning('该文件类型不支持在线编辑，请下载后使用本地编辑器')
+    return
+  }
   dialogs.edit.fileId = row.id
   dialogs.edit.fileName = row.fileName
   dialogs.edit.content = ''

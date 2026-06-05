@@ -162,9 +162,9 @@ class TestAuthService:
 
     def test_register_duplicate_username(self, seeded_db):
         db, *__ = seeded_db
-        register(db, "dup_user", "pass1")
+        register(db, "dup_user", "TestPass1!")
         with pytest.raises(HTTPException) as exc_info:
-            register(db, "dup_user", "pass2")
+            register(db, "dup_user", "TestPass2!")
         assert exc_info.value.status_code == 409
         db.rollback()
 

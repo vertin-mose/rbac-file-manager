@@ -22,15 +22,26 @@ export const useFileStore = defineStore('file', () => {
         }
     }
 
-    async function openDirectory(target: { id: number; fileName?: string; name?: string }) {
-        const index = currentPath.value.findIndex((item) => item.id === target.id)
-        if (index >= 0) {
-            currentPath.value = currentPath.value.slice(0, index + 1)
+    async function openDirectory(target: {
+        id: number
+        fileName?: string
+        name?: string
+        path?: { id: number; name: string }[]
+    }) {
+        // If the caller provides a full ancestor path (e.g. from FileTree), use it directly.
+        // This prevents incorrect nesting when navigating between sibling directories.
+        if (target.path && target.path.length > 0) {
+            currentPath.value = [...target.path]
         } else {
-            currentPath.value.push({
-                id: target.id,
-                name: target.fileName || target.name || `目录 ${target.id}`,
-            })
+            const index = currentPath.value.findIndex((item) => item.id === target.id)
+            if (index >= 0) {
+                currentPath.value = currentPath.value.slice(0, index + 1)
+            } else {
+                currentPath.value.push({
+                    id: target.id,
+                    name: target.fileName || target.name || `目录 ${target.id}`,
+                })
+            }
         }
         selectedFile.value = null
         await loadFiles(target.id)

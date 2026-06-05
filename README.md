@@ -149,7 +149,7 @@
 ┌──────────────────▼───────────────────────────────────┐
 │               Backend (Python FastAPI)                 │
 │                                                        │
-│  main.py — 全部路由（22 个 API 端点）                    │
+│  main.py — 全部路由（44 个 API 端点）                    │
 │  auth.py — JWT + 密码 + 认证依赖                        │
 │  services.py — 业务逻辑（RBAC、文件、审计）              │
 │  models.py — 数据表映射 + 请求/响应模型                  │
@@ -242,7 +242,7 @@
 rbac-file-manager/
 │
 ├── backend/                         # Python FastAPI 后端
-│   ├── main.py                      # 应用入口：FastAPI 初始化、CORS、22 条 API 路由、权限检查依赖
+│   ├── main.py                      # 应用入口：FastAPI 初始化、CORS、44 条 API 路由、权限检查依赖
 │   ├── models.py                    # 数据模型：9 个 SQLAlchemy ORM 模型（User、Role、Permission 等）
 │   │                                # + Pydantic 请求/响应数据模型（LoginRequest、RoleOut 等）
 │   ├── auth.py                      # 认证模块：JWT Token 签发/验证、BCrypt 密码哈希、get_current_user 依赖
@@ -297,10 +297,10 @@ rbac-file-manager/
 │   └── package.json                 # Node.js 依赖配置
 │
 ├── database/                        # 数据库脚本
-│   ├── init.sql                     # 建表语句：8 张核心表 + 1 张关联表 DDL
+│   ├── init.sql                     # 建表语句：10 张表 DDL
 │   │                                # users、roles、permissions、user_roles、role_permissions
 │   │                                # role_hierarchy、file_records、file_permissions、audit_logs
-│   └── seed.sql                     # 种子数据：6 角色 + 角色层级关系 + 22 条权限 + 默认管理员
+│   └── seed.sql                     # 种子数据：6 角色 + 角色层级关系 + 24 条权限 + 默认管理员
 │                                    # + 角色-权限映射 + 根目录
 │
 ├── docker-compose.yml               # 容器编排：5 个服务（MySQL + Redis + MinIO + Backend + Frontend）
@@ -390,6 +390,7 @@ rbac-file-manager/
 | **doc:comment** | | ✓ | ✓ | ✓(inherit) | ✓(inherit) | ✓(inherit) |
 | **doc:create** | | | ✓ | ✓(inherit) | ✓(inherit) | ✓(inherit) |
 | **doc:update** | | | ✓ | ✓(inherit) | ✓(inherit) | ✓(inherit) |
+| **doc:edit** | | | ✓ | ✓(inherit) | ✓(inherit) | ✓(inherit) |
 | **doc:share** | | | ✓ | ✓(inherit) | ✓(inherit) | ✓(inherit) |
 | **doc:delete** | | | | ✓ | ✓(inherit) | ✓(inherit) |
 | **doc:approve** | | | | ✓ | ✓(inherit) | ✓(inherit) |
@@ -407,7 +408,7 @@ rbac-file-manager/
 | **system:backup** | | | | | ✓ | ✓(inherit) |
 | **system:config** | | | | | | ✓ |
 
-> **EDITOR 与 REVIEWER 区别**：EDITOR 拥有 `doc:create/update/share/comment`（不含 `doc:review`），REVIEWER 拥有 `doc:review/comment`（不含编辑权限）。这是企业文档管理中编辑与审核分离的典型要求。
+> **EDITOR 与 REVIEWER 区别**：EDITOR 拥有 `doc:create/update/edit/share/comment`（不含 `doc:review`），REVIEWER 拥有 `doc:review/comment`（不含编辑权限）。其中 `doc:update`（上传替换内容）与 `doc:edit`（在线编辑文本）是两个独立权限。这是企业文档管理中编辑与审核分离的典型要求。
 >
 > **显示名称说明**：前端显示的权限中文名称与实际功能对应——"更新文档"对应重命名和更新内容、"启用用户"对应启用/禁用账号、"下载文档"对应文件下载。`system:config`（配置系统）和 `system:backup`（备份系统）为预留权限，后端暂未实现对应 API。
 
@@ -671,96 +672,19 @@ git push -u origin main
 
 ### 发布到 GitHub Container Registry (ghcr.io)
 
-GitHub Container Registry 与 GitHub 账号绑定，无需 Docker Hub 登录，团队成员可直接拉取使用。
-
-#### 第一步：创建 GitHub Personal Access Token
-
-1. 登录 GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens（或 Tokens (classic)）
-2. 点击 **Generate new token**
-3. Token 权限（classic）：勾选 `write:packages`、`read:packages`、`delete:packages`
-4. 生成后复制保存（只显示一次）
+适合团队协作时共享镜像，无需 Docker Hub。首次需创建 GitHub Personal Access Token（`write:packages` 权限）。
 
 ```bash
-# 将 token 和用户名写入 .env 文件（该文件已在 .gitignore 中，不会提交）
-echo 'GITHUB_USERNAME=你的GitHub用户名' >> .env
-echo 'GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx' >> .env
-```
-
-> ⚠️ 也可以写在 `backend/.env.docker` 中（已内置 `GITHUB_USERNAME` 和 `GITHUB_TOKEN` 字段），但注意不要将 token 提交到 Git。
-
-#### 第二步：登录 ghcr.io 并推送镜像
-
-```bash
-# 1. 登录 GitHub Container Registry
+# 登录并推送
 echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USERNAME --password-stdin
-
-# 2. 构建镜像
 docker compose build
-
-# 3. 给镜像打标签（ghcr.io 格式）
-docker tag rbac-file-manager-backend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:latest
-docker tag rbac-file-manager-frontend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:latest
-
-# 4. 推送到 ghcr.io
-docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:latest
-docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:latest
-```
-
-#### 第三步：将 GitHub Package 设为公开（首次需要）
-
-推送成功后，默认权限为 **Private**，团队成员无法拉取。需手动设为 Public：
-
-1. 打开 `https://github.com/YOUR_USERNAME?tab=packages`
-2. 点击 `rbac-file-manager-backend` → Package settings → Danger Zone → Change visibility → **Public**
-3. 对 `rbac-file-manager-frontend` 同样操作
-
-> 设为 Public 后，任何人无需认证即可拉取（`docker pull` 不需要 token）。
-
-#### 第四步：其他成员拉取运行
-
-```bash
-# 1. 克隆代码
-git clone https://github.com/YOUR_USERNAME/rbac-file-manager.git
-cd rbac-file-manager
-
-# 2. 配置环境变量（不需要 GITHUB_TOKEN 即可拉取公开镜像）
-cp backend/.env.docker .env
-# 编辑 .env，修改 GITHUB_USERNAME 为发布者的 GitHub 用户名
-
-# 3. 拉取镜像并启动
-docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-
-# 4. 验证服务
-docker compose ps
-```
-
-#### 镜像更新流程
-
-```bash
-# 1. 重新构建镜像
-docker compose build
-
-# 2. 登录 ghcr.io（如已登录可跳过）
-echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USERNAME --password-stdin
-
-# 3. 推送更新
 docker tag rbac-file-manager-backend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:latest
 docker tag rbac-file-manager-frontend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:latest
 docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:latest
 docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:latest
-
-# 4. 团队成员拉取更新
-# docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-# docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-> **版本标签建议**：除了 `latest`，建议同时推送版本号标签（如 `v1.0.0`），方便回滚：
-> ```bash
-> docker tag rbac-file-manager-backend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:v1.0.0
-> docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:v1.0.0
-> ```
-> 其他成员修改 `.env` 中 `IMAGE_TAG=v1.0.0` 即可拉取指定版本。
+推送后在 GitHub Package Settings 中设为 Public，团队成员即可通过 `docker compose pull` 拉取。建议同时推送 `v1.0.0` 版本标签方便回滚。
 
 ---
 
@@ -848,17 +772,17 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml pull       # 拉
 | **审阅/审批/评论弹窗** | `frontend/src/components/FileActivityDialog.vue` | 支持三种模式、显示当前版本和历史版本活动记录、审批含通过/驳回单选 |
 | **角色管理** | `frontend/src/views/role/RoleManagement.vue` | 角色 CRUD 表格 + 权限矩阵勾选（含继承权限展示）+ L1-L5 层级树形展示 |
 | **审计日志查看器** | `frontend/src/views/audit/AuditLogView.vue` | 分页表格 + 操作类型筛选 + 用户 ID 筛选 + 前端日期范围过滤 + CSV 导出 |
-| **用户管理** | `frontend/src/views/users/UserManagement.vue` | 用户列表（含角色标签、状态标签）+ 用户名搜索 + 角色筛选 + 创建用户弹窗（含角色选择）+ 启用/禁用切换 + 删除用户 + 保留分配角色功能 |
+| **用户管理** | `frontend/src/views/users/UserManagement.vue` | 用户列表（含角色标签、状态标签）+ 用户名搜索 + 角色筛选 + 创建用户弹窗（含角色选择）+ 启用/禁用切换 + 删除用户 |
+| **个人信息** | `frontend/src/views/login/` | 个人资料修改 + 密码修改（需验证旧密码+密码复杂度校验） |
 | 前端公共工具 | `frontend/src/utils/format.ts` | 日期格式化 + 文件大小格式化 |
-| 权限常量 | `frontend/src/constants/permissions.ts` | 权限分组定义 |
-| 文件查看下载 | `frontend/src/views/file/FileManager.vue` | "查看"按钮（位于重名前）、双击文件直接打开、文件名 hover 下划线效果；通过 JWT 认证的 blob 下载，避免无 token 的 401 错误 |
+| 权限常量 | `frontend/src/constants/permissions.ts` | 24 条权限的完整定义与分类 |
 
 #### 已知限制
 
 | 问题 | 说明 |
 |------|------|
-| 审计日志日期范围仅前端过滤 | 后端审计接口仅支持 `action` 和 `userId` 参数，不支持日期范围 |
 | 文件查看依赖 MinIO | 文件下载查看功能需要 MinIO 服务可用，否则返回错误 |
+| 前端测试未实现 | Vue 组件单元测试（Vitest）和 E2E 测试尚未编写 |
 
 ### 文件级权限说明
 
@@ -877,14 +801,14 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml pull       # 拉
 
 | 文件 | 内容 | 说明 |
 |------|------|------|
-| `database/init.sql` | 9 张表 DDL | User、Role、Permission、UserRole、RolePermission、RoleHierarchy、FileRecord、FilePermission、AuditLog |
-| `database/seed.sql` | 种子数据 | 6 角色（SUPER_ADMIN → VIEWER）、角色层级关系、默认管理员（admin/admin123）、全部 22 条权限记录 |
+| `database/init.sql` | 10 张表 DDL | User、Role、Permission、UserRole、RolePermission、RoleHierarchy、FileRecord、FilePermission、FileActivity、AuditLog |
+| `database/seed.sql` | 种子数据 | 6 角色（SUPER_ADMIN → VIEWER）、角色层级关系、默认管理员（admin/admin123）、全部 24 条权限记录 |
 
 数据库表结构：
 
 | 表名 | 用途 |
 |------|------|
-| `users` | 用户表（用户名、密码哈希、显示名、角色关联） |
+| `users` | 用户表（用户名、密码哈希、显示名、角色关联、登录锁定） |
 | `roles` | 角色表（角色名称、描述） |
 | `permissions` | 权限表（权限名称、所属分类、描述） |
 | `user_roles` | 用户-角色多对多关联 |
@@ -905,23 +829,22 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml pull       # 拉
 
 #### 已完成
 
-| 文件 | 内容 | 运行方式 |
-|------|------|---------|
+| 文件/目录 | 内容 | 运行方式 |
+|-----------|------|---------|
+| `backend/tests/` | pytest 单元测试 + API 集成测试 | `cd backend && pytest tests/ -v` |
 | `test_verify.py` | 全流程集成测试脚本 | `python test_verify.py`（需先启动后端） |
 
-测试覆盖范围（6 大模块、20+ 测试点）：
-1. **健康检查** — 后端 `/api/health` 端点
-2. **认证测试** — 管理员登录、错误密码返回 401、注册新用户、重复注册返回 409
-3. **角色测试** — 角色列表（6 个）、角色详情、角色层级、无 Token 访问被拒
-4. **文件测试** — 列表、创建目录、重命名、删除、不存在的文件返回 404
-5. **审计日志测试** — 分页查询、操作类型验证、CSV 导出
-6. **RBAC 继承测试** — 无角色用户访问受限
+测试覆盖范围（6 大模块、130+ 测试用例）：
+1. **认证测试** — 登录/注册/密码验证/账户锁定/密码强度
+2. **角色测试** — 6 角色 CRUD、层级继承、权限分配、用户角色分配
+3. **文件测试** — 上传/下载/目录/重命名/删除/内容更新/文本编辑
+4. **文件权限测试** — 用户级/角色级权限设置、继承、CRUD
+5. **审计日志测试** — 分页查询/筛选/导出/删除/批量删除
+6. **RBAC 继承测试** — 递归权限解析、层级完整性修复
 
 #### 待完成
 
-- **单元测试**：为 `backend/services.py` 中各 service 函数添加 pytest 单元测试（文件位置：建议新建 `backend/tests/` 目录）
-- **API 测试**：使用 FastAPI TestClient 的自动化测试
-- **前端测试**：Vue 组件单元测试（Vitest）和 E2E 测试（如适用）
+- **前端测试**：Vue 组件单元测试（Vitest）和 E2E 测试（Cypress/Playwright）
 
 ---
 
@@ -965,8 +888,14 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml pull       # 拉
 | POST | `/api/files/{id}/review` | 提交审阅 | doc:review |
 | POST | `/api/files/{id}/approve` | 审批文档（通过/驳回） | doc:approve |
 | POST | `/api/files/{id}/comment` | 添加评论 | doc:comment |
-| PUT | `/api/files/{id}/content` | 更新文件内容（覆盖原文件，保留历史活动） | doc:update |
+| PUT | `/api/files/{id}/content` | 更新文件内容（上传替换，覆盖原文件） | doc:update |
+| GET | `/api/files/{id}/content/text` | 读取文件文本内容（用于在线编辑） | doc:edit |
+| PUT | `/api/files/{id}/content/text` | 保存在线编辑的文本内容 | doc:edit |
 | GET | `/api/files/{id}/activities` | 获取文件审阅/审批/评论活动记录 | doc:read |
+| DELETE | `/api/files/{id}/activities/{aid}` | 删除活动记录（仅作者或管理员） | 需认证 |
+| GET | `/api/files/{id}/permissions` | 查看文件级权限配置 | doc:read |
+| PUT | `/api/files/{id}/permissions` | 设置文件级权限 | file:permission:manage |
+| DELETE | `/api/files/{id}/permissions/{pid}` | 删除文件级权限 | file:permission:manage |
 
 ### 用户管理接口
 
@@ -975,15 +904,19 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml pull       # 拉
 | GET | `/api/users` | 用户列表 | user:read |
 | GET | `/api/users/{id}` | 用户详情（含角色、启用状态） | role:read |
 | POST | `/api/users` | 管理员创建用户（含角色选择） | user:create |
+| PUT | `/api/users/{id}` | 管理员更新用户（含密码重置） | user:update |
 | PUT | `/api/users/{id}/roles` | 分配用户角色 | role:assign |
 | PUT | `/api/users/{id}/status` | 启用/禁用用户 | user:update |
 | DELETE | `/api/users/{id}` | 删除用户（软删除） | user:delete |
+| PUT | `/api/auth/profile` | 当前用户修改个人信息/密码 | 需认证 |
 
 ### 审计日志接口
 
 | 方法 | 路径 | 说明 | 最低权限 |
 |------|------|------|---------|
 | GET | `/api/audit-logs` | 日志列表（分页+筛选） | audit:read |
+| DELETE | `/api/audit-logs/{id}` | 删除单条日志 | audit:read |
+| DELETE | `/api/audit-logs` | 批量删除日志 | audit:read |
 | GET | `/api/audit-logs/export` | 导出 CSV | audit:export |
 
 ---
@@ -1064,16 +997,41 @@ docker compose restart backend
 
 ## 安全特性
 
+### 认证与授权
+
 | 特性 | 实现方式 |
 |------|----------|
-| 密码加密 | BCrypt |
-| 认证 | JWT Token（无状态） |
-| 授权 | 权限依赖注入 + 角色层级递归解析 |
-| CORS 防护 | FastAPI CORSMiddleware 白名单 |
-| 审计日志 | services.py 中 record_audit() 函数 |
-| XSS 防护 | Element Plus 自动转义 |
-| SQL 注入防护 | SQLAlchemy 参数绑定 |
-| 角色职责分离 | EDITOR 与 REVIEWER 权限分离，不可相互操作 |
+| 密码加密 | BCrypt 哈希（`auth.py`） |
+| 密码复杂度 | 最少 8 位、含大小写字母和数字（`services.py:validate_password_strength`） |
+| 无状态认证 | JWT Token，HS256 签名，24 小时过期 |
+| RBAC 授权 | `require_perm()` 依赖注入，每个 API 端点声明所需权限 |
+| 角色层级继承 | `get_effective_permissions()` 递归解析，高级角色自动继承下级全部权限 |
+| 文件级权限 | `_check_file_permission()` 支持按用户/角色对特定文件设置访问控制 |
+| 角色职责分离 | EDITOR 与 REVIEWER 权限互不重叠，实现编辑/审核分离 |
+
+### 攻击防护
+
+| 特性 | 实现方式 |
+|------|----------|
+| 账户锁定 | 连续 5 次登录失败后锁定 15 分钟（返回 HTTP 423） |
+| SQL 注入防护 | SQLAlchemy ORM 参数化查询 |
+| XSS 防护 | Element Plus 自动转义 + 安全响应头 |
+| CORS 防护 | FastAPI CORSMiddleware |
+| Clickjacking 防护 | `X-Frame-Options: DENY` |
+| MIME 嗅探防护 | `X-Content-Type-Options: nosniff` |
+| HTTPS 强制 | `Strict-Transport-Security` (HSTS) |
+| 隐私保护 | `Referrer-Policy` + `Cache-Control` 响应头 |
+| 浏览器 API 管控 | `Permissions-Policy` 禁用不必要的设备 API |
+
+### 审计与监控
+
+| 特性 | 实现方式 |
+|------|----------|
+| 全操作审计 | `record_audit()` 记录登录/登出/注册/文件操作/角色变更/用户管理 |
+| 客户端 IP 追踪 | 每条审计日志记录来源 IP 地址 |
+| 登录失败记录 | `LOGIN_FAILED` 事件含失败次数和锁定状态 |
+| 日志导出 | 支持按操作类型/用户/日期范围筛选并导出 CSV |
+| 软删除 | 所有核心实体支持软删除，数据可恢复 |
 
 ---
 

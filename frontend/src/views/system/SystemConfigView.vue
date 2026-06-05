@@ -68,11 +68,27 @@
         <div class="policy-list">
           <div>
             <span>密码策略</span>
-            <el-tag size="small" type="info" effect="plain">待配置</el-tag>
+            <el-tag size="small" type="success" effect="plain">已启用</el-tag>
+          </div>
+          <div>
+            <span>密码复杂度要求</span>
+            <span class="policy-detail">最少 8 位，含大小写字母和数字</span>
           </div>
           <div>
             <span>登录限制</span>
-            <el-tag size="small" type="info" effect="plain">待配置</el-tag>
+            <el-tag size="small" type="success" effect="plain">已启用</el-tag>
+          </div>
+          <div>
+            <span>账户锁定机制</span>
+            <span class="policy-detail">连续 5 次失败后锁定 15 分钟</span>
+          </div>
+          <div>
+            <span>安全响应头</span>
+            <el-tag size="small" type="success" effect="plain">已启用</el-tag>
+          </div>
+          <div>
+            <span>HTTP 安全头</span>
+            <span class="policy-detail">X-Frame-Options / CSP / HSTS 等</span>
           </div>
           <div>
             <span>异常告警</span>
@@ -215,6 +231,12 @@ import { DataLine, Lock, Monitor } from '@element-plus/icons-vue'
   padding: 10px 12px;
   border-radius: 8px;
   background: #f7fafc;
+}
+
+.policy-detail {
+  color: #8496a6;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 @media (max-width: 1120px) {

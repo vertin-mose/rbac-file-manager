@@ -48,6 +48,9 @@ request.interceptors.response.use(
             case 404:
                 ElMessage.warning('请求的资源不存在')
                 break
+            case 423:
+                ElMessage.error(message || '账户已被锁定，请稍后再试')
+                break
             case 500:
                 ElMessage.error('服务器内部错误，请稍后重试')
                 break

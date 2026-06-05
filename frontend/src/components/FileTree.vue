@@ -65,7 +65,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'select', payload: { id: number; name: string }): void
+  (event: 'select', payload: { id: number; name: string; path?: { id: number; name: string }[] }): void
   (event: 'create-root'): void
   (event: 'create-child', payload: { id: number; label: string; parentId: number }): void
   (event: 'rename', payload: { id: number; label: string; parentId: number }): void
@@ -122,12 +122,25 @@ function buildTree(items: FileItem[]): TreeNode[] {
   return roots
 }
 
+function buildAncestorPath(nodeId: number): { id: number; name: string }[] {
+  const path: { id: number; name: string }[] = []
+  let current = nodeId
+  while (current !== 0) {
+    const dir = directories.value.find(d => d.id === current)
+    if (!dir) break
+    path.unshift({ id: dir.id, name: dir.fileName })
+    current = dir.parentId ?? 0
+  }
+  return [{ id: 0, name: 'Root' }, ...path]
+}
+
 function handleNodeClick(node: TreeNode) {
-  emit('select', { id: node.id, name: node.label })
+  const path = buildAncestorPath(node.id)
+  emit('select', { id: node.id, name: node.label, path })
 }
 
 function selectRoot() {
-  emit('select', { id: 0, name: '全部文件' })
+  emit('select', { id: 0, name: '全部文件', path: [{ id: 0, name: 'Root' }] })
 }
 
 defineExpose({ reload: loadTree })

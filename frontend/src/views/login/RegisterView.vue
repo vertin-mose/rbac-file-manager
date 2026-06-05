@@ -30,6 +30,7 @@
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
+          <span class="password-hint">最少 8 位，需包含大写字母、小写字母和数字</span>
         </el-form-item>
         <el-form-item label="确认密码">
           <el-input v-model="form.confirmPassword" type="password" show-password placeholder="请再次输入密码" />
@@ -157,6 +158,14 @@ async function handleRegister() {
 .submit-button {
   width: 100%;
   min-height: 44px;
+}
+
+.password-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #8496a6;
+  line-height: 1.4;
 }
 
 .auth-footer {

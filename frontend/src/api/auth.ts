@@ -36,3 +36,23 @@ export function register(data: { username: string; password: string; displayName
 export function logout() {
     return request.post('/auth/logout')
 }
+
+export interface MeResponse {
+    user_id: number
+    username: string
+    roles: string[]
+    permissions: string[]
+}
+
+export function fetchMe() {
+    return request.get('/auth/me')
+}
+
+export function updateProfile(data: {
+    display_name?: string
+    email?: string
+    old_password?: string
+    new_password?: string
+}) {
+    return request.put('/auth/profile', data)
+}

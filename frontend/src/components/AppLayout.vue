@@ -24,7 +24,12 @@
           <span>文件管理</span>
         </el-menu-item>
 
-        <el-menu-item v-if="userStore.highestLevel <= 2" index="/roles">
+        <el-menu-item v-if="userStore.hasPermission('user:read')" index="/users">
+          <el-icon><User /></el-icon>
+          <span>用户管理</span>
+        </el-menu-item>
+
+        <el-menu-item v-if="userStore.hasPermission('role:read')" index="/roles">
           <el-icon><Setting /></el-icon>
           <span>角色管理</span>
         </el-menu-item>
@@ -77,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { logout as apiLogout } from '@/api/auth'
@@ -85,6 +90,10 @@ import { logout as apiLogout } from '@/api/auth'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+
+onMounted(() => {
+  userStore.refreshPermissions()
+})
 
 const roleTagType = computed(() => {
   if (userStore.highestLevel <= 2) return 'danger'
@@ -97,6 +106,7 @@ const currentTitle = computed(() => {
   const map: Record<string, string> = {
     '/dashboard': '总体数据',
     '/files': '文件管理',
+    '/users': '用户管理',
     '/roles': '角色管理',
     '/audit': '审计日志',
     '/system-config': '系统配置',

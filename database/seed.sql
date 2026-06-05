@@ -6,15 +6,16 @@
 -- === Permissions (Document Management Focus) ===
 INSERT INTO permissions (name, description, category) VALUES
 -- Document permissions
-('doc:create',  'Create new documents and directories',    'document'),
-('doc:read',    'View, search and download documents',     'document'),
-('doc:update',  'Edit and modify document content',        'document'),
-('doc:delete',  'Delete documents and directories',        'document'),
+('doc:create',  'Create directories and upload files',                 'document'),
+('doc:read',    'View, preview, search and download documents',      'document'),
+('doc:update',  'Rename files or directories, update file content (upload replacement)',  'document'),
+('doc:edit',    'Edit file text content inline',              'document'),
+('doc:delete',  'Delete files and directories',                      'document'),
 ('doc:review',  'Review documents and suggest changes',    'document'),
 ('doc:approve', 'Approve/reject document reviews',         'document'),
 ('doc:comment', 'Add comments and annotations',            'document'),
 ('doc:share',   'Share documents with users or roles',     'document'),
-('doc:export',  'Export documents to PDF/other formats',   'document'),
+('doc:export',  'Download document files',                          'document'),
 -- User management permissions
 ('user:read',   'View user list and profiles',             'user'),
 ('user:create', 'Create new user accounts',                'user'),
@@ -31,7 +32,8 @@ INSERT INTO permissions (name, description, category) VALUES
 ('audit:export','Export audit logs',                       'audit'),
 -- System permissions
 ('system:config', 'Modify system configuration',           'system'),
-('system:backup', 'Perform system backup and restore',     'system');
+('system:backup', 'Perform system backup and restore',     'system'),
+('file:permission:manage', 'Manage file role permissions', 'file');
 
 
 -- === Roles (6 roles for Enterprise Document Management & Collaboration) ===
@@ -40,11 +42,11 @@ INSERT INTO permissions (name, description, category) VALUES
 --                                                    > REVIEWER (L4) >
 INSERT INTO roles (name, description) VALUES
 ('SUPER_ADMIN', '超级管理员 - 系统最高权限，全部功能模块可见，可管理系统配置与安全策略'),
-('ADMIN',       '系统管理员 - 负责用户管理、角色分配、审计日志导出与系统备份维护'),
+('ADMIN',       '系统管理员 - 负责用户管理、角色分配与审计日志导出等管理工作'),
 ('MANAGER',     '部门经理 - 管理部门文档和团队成员，可审批、删除文档，查看审计日志'),
 ('EDITOR',      '文档编辑员 - 创建、编辑、共享文档，参与文档评论'),
 ('REVIEWER',    '文档审核员 - 审阅文档、添加评论和批注、建议修改'),
-('VIEWER',      '外部访客 - 仅可浏览、搜索和下载文档');
+('VIEWER',      '访客 - 仅可浏览、搜索和下载文档');
 
 
 -- === Role-Permission Mapping ===
@@ -65,12 +67,12 @@ WHERE r.name = 'REVIEWER' AND p.name IN (
     'doc:review', 'doc:comment'
 );
 
--- EDITOR: create + update + share + comment (inherits VIEWER through hierarchy)
+-- EDITOR: create + update + edit + share + comment (inherits VIEWER through hierarchy)
 -- NOTE: EDITOR deliberately lacks doc:review (separation of duties — editors should not review their own work)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'EDITOR' AND p.name IN (
-    'doc:create', 'doc:update', 'doc:share', 'doc:comment'
+    'doc:create', 'doc:update', 'doc:edit', 'doc:share', 'doc:comment'
 );
 
 -- MANAGER: delete + approve + user:read + role:read (inherits EDITOR + REVIEWER through hierarchy)
@@ -83,21 +85,21 @@ WHERE r.name = 'MANAGER' AND p.name IN (
     'audit:read'
 );
 
--- ADMIN: user:crud + role:crud/assign + audit:export + system:backup (inherits MANAGER)
+-- ADMIN: user:crud + role:crud/assign + audit:export + file:permission:manage (inherits MANAGER)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'ADMIN' AND p.name IN (
     'user:create', 'user:update', 'user:delete',
     'role:create', 'role:update', 'role:delete', 'role:assign',
     'audit:export',
-    'system:backup'
+    'file:permission:manage'
 );
 
--- SUPER_ADMIN: system:config (inherits ADMIN = all permissions)
+-- SUPER_ADMIN: system:config + system:backup (inherits ADMIN = all permissions)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'SUPER_ADMIN' AND p.name IN (
-    'system:config'
+    'system:config', 'system:backup'
 );
 
 

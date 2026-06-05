@@ -30,10 +30,16 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('@/views/file/FileManager.vue'),
             },
             {
+                path: 'users',
+                name: 'UserManagement',
+                component: () => import('@/views/users/UserManagement.vue'),
+                meta: { roles: ['MANAGER', 'ADMIN', 'SUPER_ADMIN'] },
+            },
+            {
                 path: 'roles',
                 name: 'RoleManagement',
                 component: () => import('@/views/role/RoleManagement.vue'),
-                meta: { roles: ['ADMIN', 'SUPER_ADMIN'] },
+                meta: { roles: ['MANAGER', 'ADMIN', 'SUPER_ADMIN'] },
             },
             {
                 path: 'audit',

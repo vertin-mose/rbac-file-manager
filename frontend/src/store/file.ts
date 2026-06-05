@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { getFiles, type FileItem } from '@/api/file'
 
 export const useFileStore = defineStore('file', () => {
-    const currentPath = ref<{ id: number; name: string }[]>([{ id: 0, name: '全部文件' }])
+    const currentPath = ref<{ id: number; name: string }[]>([{ id: 0, name: 'Root' }])
     const files = ref<FileItem[]>([])
     const selectedFile = ref<FileItem | null>(null)
     const loading = ref(false)
@@ -42,7 +42,7 @@ export const useFileStore = defineStore('file', () => {
     }
 
     async function resetToRoot() {
-        currentPath.value = [{ id: 0, name: '全部文件' }]
+        currentPath.value = [{ id: 0, name: 'Root' }]
         selectedFile.value = null
         await loadFiles(0)
     }

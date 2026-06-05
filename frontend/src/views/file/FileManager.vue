@@ -15,7 +15,6 @@
           <el-button
             v-if="userStore.hasPermission('doc:create')"
             type="primary"
-            :icon="Plus"
             @click="openCreateDialog()"
           >
             新建目录
@@ -23,7 +22,6 @@
           <el-button
             v-if="userStore.hasPermission('doc:create')"
             type="success"
-            :icon="Upload"
             @click="triggerFileUpload"
           >
             上传文件
@@ -34,7 +32,13 @@
             style="display: none"
             @change="handleFileInputChange"
           />
-          <el-button :icon="Refresh" :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
+          <input
+            ref="updateInputRef"
+            type="file"
+            style="display: none"
+            @change="handleUpdateInputChange"
+          />
+          <el-button :loading="fileStore.loading" @click="refreshAll">刷新</el-button>
         </div>
       </section>
 
@@ -75,9 +79,14 @@
                   <h2>目录内容</h2>
                   <p>双击目录进入，单击选中项目后执行操作。</p>
                 </div>
-                <div class="ability-summary" :title="availableFileActions.join('、')">
-                  <strong>{{ availableFileActions.length }}</strong>
-                  <span>项可用操作</span>
+                <div class="ability-summary">
+                  <el-tag
+                    v-if="userStore.hasPermission('file:permission:manage')"
+                    type="warning"
+                    effect="plain"
+                    size="small"
+                  >管理员权限模式</el-tag>
+                  <el-tag v-else effect="plain" size="small">文件权限控制模式</el-tag>
                 </div>
               </div>
             </template>
@@ -104,9 +113,9 @@
                 </template>
               </el-table-column>
 
-              <el-table-column label="类型" min-width="140">
+              <el-table-column label="类型" min-width="120">
                 <template #default="{ row }">
-                  <el-tag :type="row.isDirectory ? 'warning' : 'info'" effect="plain">
+                  <el-tag :type="row.isDirectory ? 'warning' : 'info'" effect="plain" size="small">
                     {{ row.isDirectory ? '目录' : fileTypeLabel(row.mimeType) }}
                   </el-tag>
                 </template>
@@ -144,6 +153,30 @@
                       查看
                     </el-button>
                     <el-button
+                      v-if="!row.isDirectory && userStore.hasPermission('doc:edit')"
+                      link
+                      type="primary"
+                      @click.stop="handleEditFile(row)"
+                    >
+                      编辑
+                    </el-button>
+                    <el-button
+                      v-if="!row.isDirectory"
+                      link
+                      type="primary"
+                      @click.stop="handleDownloadFile(row)"
+                    >
+                      下载
+                    </el-button>
+                    <el-button
+                      v-if="!row.isDirectory && userStore.hasPermission('doc:update')"
+                      link
+                      type="primary"
+                      @click.stop="handleUpdateFile(row)"
+                    >
+                      更新
+                    </el-button>
+                    <el-button
                       v-if="userStore.hasPermission('doc:update')"
                       link
                       @click.stop="openRenameDialog({ id: row.id, label: row.fileName })"
@@ -153,7 +186,7 @@
                     <el-button
                       v-if="userStore.hasPermission('doc:share')"
                       link
-                      @click.stop="openActionDialog('share', row)"
+                      @click.stop="openShareDialog(row)"
                     >
                       共享
                     </el-button>
@@ -185,6 +218,14 @@
                       @click.stop="confirmDelete(row)"
                     >
                       删除
+                    </el-button>
+                    <el-button
+                      v-if="userStore.hasPermission('file:permission:manage')"
+                      link
+                      type="warning"
+                      @click.stop="openPermissionDialog(row)"
+                    >
+                      权限
                     </el-button>
                   </div>
                 </template>
@@ -242,51 +283,78 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dialogs.action.visible" :title="actionDialogTitle" width="500px">
-      <template v-if="dialogs.action.mode === 'share'">
-        <el-form label-position="top">
-          <el-form-item label="用户 ID 列表">
-            <el-input v-model="dialogs.action.userIdsText" placeholder="例如：1,2,3" />
-          </el-form-item>
-          <el-form-item label="角色 ID 列表">
-            <el-input v-model="dialogs.action.roleIdsText" placeholder="例如：4,5" />
-          </el-form-item>
-        </el-form>
+    <FilePermissionDialog
+      :visible="dialogs.permission.visible"
+      :file-id="dialogs.permission.fileId"
+      :file-name="dialogs.permission.fileName"
+      @close="dialogs.permission.visible = false"
+      @updated="refreshAll"
+    />
+
+    <ShareDialog
+      :visible="dialogs.share.visible"
+      :file-id="dialogs.share.fileId"
+      :file-name="dialogs.share.fileName"
+      @close="dialogs.share.visible = false"
+      @updated="refreshAll"
+    />
+
+    <FileActivityDialog
+      :visible="dialogs.activity.visible"
+      :file-id="dialogs.activity.fileId"
+      :file-name="dialogs.activity.fileName"
+      :mode="dialogs.activity.mode"
+      @close="dialogs.activity.visible = false"
+      @updated="refreshAll"
+    />
+
+    <el-dialog
+      v-model="dialogs.edit.visible"
+      title="编辑文件"
+      width="820px"
+      :close-on-click-modal="false"
+      @closed="dialogs.edit.content = ''"
+    >
+      <template #header>
+        <div class="edit-dialog-header">
+          <span>编辑文件</span>
+          <span class="edit-file-name">{{ dialogs.edit.fileName }}</span>
+        </div>
       </template>
-      <template v-else>
-        <el-form label-position="top">
-          <el-form-item label="说明">
-            <el-input
-              v-model="dialogs.action.content"
-              type="textarea"
-              :rows="4"
-              :placeholder="dialogs.action.mode === 'comment' ? '请输入评论内容' : '请输入处理说明'"
-            />
-          </el-form-item>
-        </el-form>
-      </template>
+      <div v-loading="dialogs.edit.loading" class="edit-textarea-wrap">
+        <el-input
+          v-model="dialogs.edit.content"
+          type="textarea"
+          :autosize="{ minRows: 18, maxRows: 30 }"
+          :disabled="dialogs.edit.saving"
+          class="edit-textarea"
+        />
+      </div>
       <template #footer>
-        <el-button @click="dialogs.action.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitAction">提交</el-button>
+        <el-button @click="dialogs.edit.visible = false" :disabled="dialogs.edit.saving">取消</el-button>
+        <el-button type="primary" @click="submitEdit" :loading="dialogs.edit.saving">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Folder, Plus, Refresh, Upload } from '@element-plus/icons-vue'
+import { Document, Folder } from '@element-plus/icons-vue'
+import FileActivityDialog from '@/components/FileActivityDialog.vue'
 import FileTree from '@/components/FileTree.vue'
+import FilePermissionDialog from '@/components/FilePermissionDialog.vue'
+import ShareDialog from '@/components/ShareDialog.vue'
 import {
-  approveFile,
-  commentFile,
   createDirectory,
   deleteFile,
   downloadFile,
+  getFileTextContent,
   renameFile,
-  reviewFile,
   shareFile,
+  updateFile,
+  updateFileTextContent,
   uploadFile,
   type FileItem,
 } from '@/api/file'
@@ -294,26 +362,11 @@ import { useFileStore } from '@/store/file'
 import { useUserStore } from '@/store/user'
 import { formatBytes, formatDateTime } from '@/utils/format'
 
-type ActionMode = 'share' | 'review' | 'approve' | 'comment'
-
 const fileStore = useFileStore()
 const userStore = useUserStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
-
-const FILE_ACTIONS = [
-  { permission: 'doc:create', label: '创建' },
-  { permission: 'doc:update', label: '编辑' },
-  { permission: 'doc:delete', label: '删除' },
-  { permission: 'doc:review', label: '审阅' },
-  { permission: 'doc:approve', label: '审批' },
-  { permission: 'doc:share', label: '共享' },
-  { permission: 'doc:comment', label: '评论' },
-] as const
-
-const availableFileActions = computed(() =>
-  FILE_ACTIONS.filter((action) => userStore.hasPermission(action.permission)).map((action) => action.label),
-)
+const updateInputRef = ref<HTMLInputElement | null>(null)
 
 const dialogs = reactive({
   create: {
@@ -327,27 +380,30 @@ const dialogs = reactive({
     fileId: 0,
     name: '',
   },
-  action: {
+  activity: {
     visible: false,
-    mode: 'share' as ActionMode,
-    file: null as FileItem | null,
-    content: '',
-    userIdsText: '',
-    roleIdsText: '',
+    fileId: 0,
+    fileName: '',
+    mode: 'review' as 'review' | 'approve' | 'comment',
   },
-})
-
-const actionDialogTitle = computed(() => {
-  switch (dialogs.action.mode) {
-    case 'share':
-      return '共享文件'
-    case 'review':
-      return '提交审阅'
-    case 'approve':
-      return '审批文件'
-    case 'comment':
-      return '添加评论'
-  }
+  edit: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
+    content: '',
+    loading: false,
+    saving: false,
+  },
+  permission: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
+  },
+  share: {
+    visible: false,
+    fileId: 0,
+    fileName: '',
+  },
 })
 
 async function refreshAll() {
@@ -376,10 +432,15 @@ async function submitCreateDirectory() {
     return
   }
 
-  await createDirectory(name, dialogs.create.parentId)
-  dialogs.create.visible = false
-  dialogs.create.name = ''
-  ElMessage.success('目录已创建')
+  try {
+    await createDirectory(name, dialogs.create.parentId)
+    dialogs.create.visible = false
+    dialogs.create.name = ''
+    ElMessage.success('目录已创建')
+  } catch {
+    ElMessage.error('创建目录失败')
+    return
+  }
 
   if (dialogs.create.jumpToRootAfterSubmit) {
     await fileStore.resetToRoot()
@@ -408,23 +469,55 @@ async function submitRename() {
   await refreshAll()
 }
 
-function openActionDialog(mode: ActionMode, file: FileItem) {
-  dialogs.action.visible = true
-  dialogs.action.mode = mode
-  dialogs.action.file = file
-  dialogs.action.content = ''
-  dialogs.action.userIdsText = ''
-  dialogs.action.roleIdsText = ''
+function openActionDialog(mode: 'review' | 'approve' | 'comment', file: FileItem) {
+  dialogs.activity.visible = true
+  dialogs.activity.mode = mode
+  dialogs.activity.fileId = file.id
+  dialogs.activity.fileName = file.fileName
 }
 
-function parseNumberList(text: string): number[] {
-  return text
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isInteger(item) && item > 0)
+function handleUpdateFile(file: FileItem) {
+  if (file.isDirectory) return
+  dialogs.activity.visible = false
+  dialogs.share.visible = false
+  dialogs.permission.visible = false
+  // Store current file and trigger file picker
+  updateTargetFile.value = file
+  updateInputRef.value?.click()
 }
 
-function fileTypeLabel(mimeType: string) {
+const updateTargetFile = ref<FileItem | null>(null)
+
+async function handleUpdateInputChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !updateTargetFile.value) return
+
+  try {
+    await updateFile(updateTargetFile.value.id, file)
+    ElMessage.success('文件已更新')
+    await refreshAll()
+  } catch {
+    ElMessage.error('更新失败')
+  } finally {
+    input.value = ''
+    updateTargetFile.value = null
+  }
+}
+
+function openPermissionDialog(file: FileItem) {
+  dialogs.permission.fileId = file.id
+  dialogs.permission.fileName = file.fileName
+  dialogs.permission.visible = true
+}
+
+function openShareDialog(file: FileItem) {
+  dialogs.share.fileId = file.id
+  dialogs.share.fileName = file.fileName
+  dialogs.share.visible = true
+}
+
+function fileTypeLabel(mimeType: string): string {
   if (!mimeType) return '文件'
   if (mimeType.includes('pdf')) return 'PDF'
   if (mimeType.includes('word') || mimeType.includes('document')) return 'Word'
@@ -432,28 +525,8 @@ function fileTypeLabel(mimeType: string) {
   if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '演示文稿'
   if (mimeType.startsWith('image/')) return '图片'
   if (mimeType.startsWith('text/')) return '文本'
+  if (mimeType.includes('zip') || mimeType.includes('compressed')) return '压缩包'
   return mimeType.split('/').pop()?.toUpperCase() || '文件'
-}
-
-async function submitAction() {
-  if (!dialogs.action.file) return
-
-  if (dialogs.action.mode === 'share') {
-    await shareFile(dialogs.action.file.id, {
-      userIds: parseNumberList(dialogs.action.userIdsText),
-      roleIds: parseNumberList(dialogs.action.roleIdsText),
-    })
-  } else if (dialogs.action.mode === 'review') {
-    await reviewFile(dialogs.action.file.id, dialogs.action.content)
-  } else if (dialogs.action.mode === 'approve') {
-    await approveFile(dialogs.action.file.id, dialogs.action.content)
-  } else {
-    await commentFile(dialogs.action.file.id, dialogs.action.content)
-  }
-
-  dialogs.action.visible = false
-  ElMessage.success('操作已提交')
-  await refreshAll()
 }
 
 async function confirmDelete(file: FileItem) {
@@ -525,6 +598,60 @@ async function handleViewFile(row: FileItem) {
   }
 }
 
+async function handleDownloadFile(row: FileItem) {
+  if (row.isDirectory) return
+  try {
+    const blob = await downloadFile(row.id)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = row.fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (e: any) {
+    const detail = e?.response?.data?.message || e?.response?.data?.detail || ''
+    ElMessage.error(detail || '文件下载失败')
+  }
+}
+
+async function handleEditFile(row: FileItem) {
+  if (row.isDirectory) return
+  dialogs.edit.fileId = row.id
+  dialogs.edit.fileName = row.fileName
+  dialogs.edit.content = ''
+  dialogs.edit.loading = true
+  dialogs.edit.visible = true
+  try {
+    dialogs.edit.content = await getFileTextContent(row.id)
+  } catch (e: any) {
+    const detail = e?.response?.data?.message || e?.response?.data?.detail || e?.message || ''
+    ElMessage.error(detail || '文件内容加载失败')
+    dialogs.edit.visible = false
+  } finally {
+    dialogs.edit.loading = false
+  }
+}
+
+async function submitEdit() {
+  if (!dialogs.edit.content.trim() && dialogs.edit.content.length === 0) {
+    ElMessage.warning('文件内容不能为空')
+    return
+  }
+  dialogs.edit.saving = true
+  try {
+    await updateFileTextContent(dialogs.edit.fileId, dialogs.edit.content)
+    dialogs.edit.visible = false
+    ElMessage.success('文件已保存')
+    await refreshAll()
+  } catch {
+    ElMessage.error('保存失败')
+  } finally {
+    dialogs.edit.saving = false
+  }
+}
+
 function triggerFileUpload() {
   fileInputRef.value?.click()
 }
@@ -534,17 +661,28 @@ async function handleFileInputChange(e: Event) {
   const file = input.files?.[0]
   if (!file) return
 
+  let newFile: any
   try {
-    await uploadFile(file, fileStore.currentParentId)
+    const res: any = await uploadFile(file, fileStore.currentParentId)
+    newFile = res.data || res
     ElMessage.success('文件上传成功')
   } catch {
     ElMessage.error('上传失败')
+    input.value = ''
+    await refreshAll()
+    return
   }
 
   // Reset input so the same file can be re-uploaded
   input.value = ''
-
   await refreshAll()
+
+  // Open permission dialog for the newly uploaded file
+  if (newFile && newFile.id) {
+    dialogs.permission.fileId = newFile.id
+    dialogs.permission.fileName = newFile.fileName || newFile.file_name
+    dialogs.permission.visible = true
+  }
 }
 
 onMounted(async () => {
@@ -569,11 +707,12 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 22px 24px;
-  border: 1px solid #dce6ee;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #ffffff 0%, #eef8f4 52%, #eef4ff 100%);
-  color: #1f3448;
+  padding: 28px 32px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(197, 145, 56, 0.16), transparent 28%),
+    linear-gradient(135deg, #12324b 0%, #204e68 52%, #2f6e86 100%);
+  color: #f5f7fa;
 }
 
 .eyebrow {
@@ -581,7 +720,7 @@ onMounted(async () => {
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #18746b;
+  color: rgba(255, 222, 173, 0.84);
 }
 
 .page-hero h1 {
@@ -593,7 +732,7 @@ onMounted(async () => {
   margin: 10px 0 0;
   max-width: 560px;
   line-height: 1.7;
-  color: #647789;
+  color: rgba(245, 247, 250, 0.8);
 }
 
 .hero-actions {
@@ -612,7 +751,7 @@ onMounted(async () => {
 .sidebar-card,
 .breadcrumb-card,
 .table-card {
-  border-radius: 8px;
+  border-radius: 20px;
 }
 
 .main-column {
@@ -639,27 +778,11 @@ onMounted(async () => {
   color: #7c8b99;
 }
 
+.action-tags,
 .table-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.ability-summary {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid #dbe8f0;
-  border-radius: 8px;
-  background: #f7fafc;
-  color: #66788a;
-  white-space: nowrap;
-}
-
-.ability-summary strong {
-  color: #1f3448;
-  font-size: 20px;
 }
 
 .name-cell {
@@ -676,6 +799,26 @@ onMounted(async () => {
 
 .name-cell:hover .file-name-text {
   text-decoration: underline;
+}
+
+.edit-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.edit-file-name {
+  font-size: 14px;
+  font-weight: 400;
+  color: #7c8b99;
+}
+.edit-textarea-wrap {
+  min-height: 360px;
+}
+.edit-textarea :deep(textarea) {
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
 }
 
 @media (max-width: 1080px) {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { login as apiLogin, type LoginRequest, type RoleInfo } from '@/api/auth'
+import { login as apiLogin, fetchMe, type LoginRequest, type RoleInfo } from '@/api/auth'
 
 export const useUserStore = defineStore('user', () => {
     const token = ref(localStorage.getItem('token') || '')
@@ -27,6 +27,21 @@ export const useUserStore = defineStore('user', () => {
         localStorage.setItem('roles', JSON.stringify(res.data.roles || []))
         localStorage.setItem('roleInfo', JSON.stringify(res.data.role_info || []))
         localStorage.setItem('permissions', JSON.stringify(res.data.permissions || []))
+    }
+
+    /** Refresh permissions from backend (resolves stale localStorage issues). */
+    async function refreshPermissions() {
+        if (!token.value) return
+        try {
+            const res: any = await fetchMe()
+            const data = res.data
+            if (data) {
+                permissions.value = data.permissions || []
+                localStorage.setItem('permissions', JSON.stringify(data.permissions || []))
+            }
+        } catch {
+            // Silent — cached permissions stay visible
+        }
     }
 
     function logout() {
@@ -69,7 +84,7 @@ export const useUserStore = defineStore('user', () => {
 
     return {
         token, userId, username, displayName, roles, roleInfo, permissions,
-        login, logout, hasRole, hasPermission,
+        login, logout, refreshPermissions, hasRole, hasPermission,
         highestLevel, roleDisplayName,
     }
 })

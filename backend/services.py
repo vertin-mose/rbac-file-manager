@@ -1346,6 +1346,7 @@ def export_audit_logs(db: Session, action: str = None, username: str = None,
         q = q.filter(AuditLog.created_at <= f"{end_date} 23:59:59")
     logs = q.order_by(desc(AuditLog.created_at)).all()
     output = io.StringIO()
+    output.write('')  # UTF-8 BOM，确保 Excel 直接打开时中文不乱码
     writer = csv.writer(output)
     writer.writerow(["ID", "UserID", "Username", "Action", "Detail", "IP", "Success", "CreatedAt"])
     for log in logs:

@@ -768,7 +768,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml pull       # 拉
 | 系统配置页 | `frontend/src/views/system/SystemConfigView.vue` | 仅 SUPER_ADMIN 可见，展示系统信息/备份/安全策略 |
 | **文件管理器** | `frontend/src/views/file/FileManager.vue` | 目录树 + 面包屑导航 + 文件列表 + 文件上传 + 创建目录 + 重命名 + 删除 + 共享/审阅/审批/评论弹窗 + 操作按钮均通过 `hasPermission()` 动态控制显示、文件更新覆盖 + 下载按钮 |
 | **目录树组件** | `frontend/src/components/FileTree.vue` | 递归展开全部目录、点击节点跳转、内联新建/重命名/删除操作 |
-| **文件权限弹窗** | `frontend/src/components/FilePermissionDialog.vue` | 角色多选→用户分配、全部用户角色级权限、上传后自动弹出、仅管理员可二次修改 |
+| **文件权限弹窗** | `frontend/src/components/FilePermissionDialog.vue` | 角色优先选择→用户分配、全部用户角色级权限、上传后自动弹出、仅管理员可二次修改 |
 | **共享弹窗** | `frontend/src/components/ShareDialog.vue` | 独立于权限管理、已共享用户标签、添加共享选用户+权限类型 |
 | **审阅/审批/评论弹窗** | `frontend/src/components/FileActivityDialog.vue` | 支持三种模式、显示当前版本和历史版本活动记录、审批含通过/驳回单选 |
 | **角色管理** | `frontend/src/views/role/RoleManagement.vue` | 角色 CRUD 表格 + 权限矩阵勾选（含继承权限展示）+ L1-L5 层级树形展示 |

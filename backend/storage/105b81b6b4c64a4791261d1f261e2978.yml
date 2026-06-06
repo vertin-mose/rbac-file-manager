@@ -1,0 +1,23 @@
+# ============================================
+# Production docker-compose override
+# Uses pre-built images from GitHub Container Registry (ghcr.io).
+#
+# Usage (team members, no build needed):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Build & push (project owner):
+#   docker compose build
+#   docker tag rbac-file-manager-backend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:latest
+#   docker tag rbac-file-manager-frontend ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:latest
+#   docker login ghcr.io -u ${GITHUB_USERNAME} -p ${GITHUB_TOKEN}
+#   docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:latest
+#   docker push ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:latest
+# ============================================
+
+services:
+  backend:
+    image: ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-backend:${IMAGE_TAG:-latest}
+
+  frontend:
+    image: ghcr.io/${GITHUB_USERNAME}/rbac-file-manager-frontend:${IMAGE_TAG:-latest}

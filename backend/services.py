@@ -41,16 +41,26 @@ def validate_password_strength(password: str) -> str | None:
         return "密码必须包含至少一个数字"
 
 
+# Global MinIO client instance (lazy singleton — checked only once)
+_minio_client: Optional[Minio] = None
+_minio_checked = False
+
+
 def get_minio_client() -> Optional[Minio]:
+    global _minio_client, _minio_checked
+    if _minio_checked:
+        return _minio_client
+    _minio_checked = True
     try:
         url = settings.MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
         client = Minio(url, access_key=settings.MINIO_ACCESS_KEY,
                        secret_key=settings.MINIO_SECRET_KEY, secure=False)
         if not client.bucket_exists(settings.MINIO_BUCKET):
             client.make_bucket(settings.MINIO_BUCKET)
-        return client
+        _minio_client = client
     except Exception:
-        return None
+        _minio_client = None
+    return _minio_client
 
 
 def record_audit(db: Session, user_id: int, username: str, action: str,

@@ -62,17 +62,17 @@
       <h4>新增权限</h4>
 
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="选择角色">
-          <el-select v-model="form.roleId" placeholder="请先选择角色" style="width: 100%" @change="handleRoleChange">
+        <el-form-item label="选择角色（可多选）">
+          <el-select v-model="form.roleIds" multiple placeholder="请选择角色，可多选" style="width: 100%" @change="handleRoleChange">
             <el-option v-for="role in roles" :key="role.id" :label="roleDisplayName(role.name) || role.name" :value="role.id" />
           </el-select>
         </el-form-item>
 
-        <el-form-item v-if="form.roleId" label="选择用户">
+        <el-form-item v-if="form.roleIds.length > 0" label="选择用户">
           <div class="user-checkbox-group">
             <el-checkbox v-model="form.allUsers" @change="handleAllUsersChange">
               <strong>全部用户</strong>
-              <span class="hint-text">（该角色下的所有用户）</span>
+              <span class="hint-text">（所选角色下的所有用户）</span>
             </el-checkbox>
             <el-divider style="margin: 4px 0" />
             <el-checkbox
@@ -85,7 +85,7 @@
               {{ user.username }}
               <span v-if="user.display_name" class="hint-text">（{{ user.display_name }}）</span>
             </el-checkbox>
-            <el-empty v-if="usersByRole.length === 0" description="该角色下暂无用户" :image-size="40" />
+            <el-empty v-if="usersByRole.length === 0" description="所选角色下暂无用户" :image-size="40" />
           </div>
         </el-form-item>
 
@@ -145,7 +145,7 @@ const roles = ref<{ id: number; name: string }[]>([])
 const users = ref<UserBasic[]>([])
 
 const form = reactive({
-  roleId: null as number | null,
+  roleIds: [] as number[],
   allUsers: false,
   selectedUserIds: [] as number[],
   types: [] as string[],
@@ -172,16 +172,16 @@ const readonlyHint = computed(() => {
 
 const canAdd = computed(() => {
   if (isReadonly.value) return false
-  if (!form.roleId) return false
+  if (form.roleIds.length === 0) return false
   if (!form.allUsers && form.selectedUserIds.length === 0) return false
   if (form.types.length === 0) return false
   return true
 })
 
 const usersByRole = computed(() => {
-  if (!form.roleId) return []
+  if (form.roleIds.length === 0) return []
   return users.value.filter((u) =>
-    u.roles?.some((r) => r.id === form.roleId),
+    u.roles?.some((r) => form.roleIds.includes(r.id)),
   )
 })
 
@@ -212,7 +212,7 @@ function permTagType(type: string): '' | 'success' | 'warning' | 'danger' {
 }
 
 function resetForm() {
-  form.roleId = null
+  form.roleIds = []
   form.allUsers = false
   form.selectedUserIds = []
   form.types = []
@@ -262,7 +262,9 @@ async function handleAdd() {
 
   if (form.allUsers) {
     for (const t of form.types) {
-      newPerms.push({ role_id: form.roleId!, permission_type: t })
+      for (const rid of form.roleIds) {
+        newPerms.push({ role_id: rid, permission_type: t })
+      }
     }
   } else {
     for (const uid of form.selectedUserIds) {
@@ -276,7 +278,7 @@ async function handleAdd() {
   const existingPerms = permissions.value
     .filter((p) => {
       if (form.allUsers) {
-        return p.roleId !== form.roleId
+        return !(p.roleId && form.roleIds.includes(p.roleId))
       }
       return !(p.userId && form.selectedUserIds.includes(p.userId))
     })

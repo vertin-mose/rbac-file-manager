@@ -44,6 +44,7 @@ export function uploadFile(file: File, parentId: number) {
     formData.append('parentId', String(parentId))
     return request.post('/files', formData, {
         headers: { 'Content-Type': undefined },
+        timeout: 120000,
     })
 }
 
@@ -52,6 +53,7 @@ export function updateFile(fileId: number, file: File) {
     formData.append('file', file)
     return request.put(`/files/${fileId}/content`, formData, {
         headers: { 'Content-Type': undefined },
+        timeout: 120000,
     })
 }
 

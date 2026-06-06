@@ -703,8 +703,12 @@ async function handleFileInputChange(e: Event) {
     const res: any = await uploadFile(file, fileStore.currentParentId)
     newFile = res.data || res
     ElMessage.success('文件上传成功')
-  } catch {
-    ElMessage.error('上传失败')
+  } catch (e: any) {
+    if (e?.code === 'ECONNABORTED' || String(e?.message ?? '').includes('timeout')) {
+      ElMessage.warning('上传请求超时，文件可能已上传成功，请刷新后检查')
+    } else {
+      ElMessage.error('上传失败')
+    }
     input.value = ''
     await refreshAll()
     return
